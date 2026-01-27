@@ -38,10 +38,6 @@ func (p Producer) Enqueue(queue string, id int) {
 	store = append(store, &job)
 }
 
-/*
-Has to start some loop process that continually checks for jobs. So maybe we have a simple
-Stores active jobs on consumer struct. This way we poll/batch jobs in memory. W
-*/
 type Job struct {
 	ID     int
 	Queue  string
@@ -54,21 +50,15 @@ type Consumer struct {
 	concurrency int
 }
 
-var isCached = false
-
 func doWork(job *Job) {
 	result := 0
-	if isCached {
-		job.Status = Succeeded
-		fmt.Println("Cache hit", job.ID)
-		return
-	}
-	for i := 0; i < 5_000_000; i++ {
+	job.Status = Succeeded
+
+	for i := range 5_000 {
 		result += i * i
 	}
 	job.Status = Succeeded
 	fmt.Println("Completed Job", job.ID, "result", result)
-	// isCached = true
 }
 
 func worker(id int, jobs <-chan *Job) {
@@ -84,7 +74,6 @@ func (c *Consumer) Run(queue string, concurrency int) {
 		go worker(w, c.InFlight)
 	}
 
-	fmt.Println("Spawned ", concurrency, " Workers")
 	for {
 		ready := []*Job{}
 
@@ -97,10 +86,7 @@ func (c *Consumer) Run(queue string, concurrency int) {
 		}
 		// If the inflight channel is empty queue up more, but also store would have to have some
 		if len(c.InFlight) == 0 && len(ready) > 0 {
-			limit := 10000
-			if len(ready) < limit {
-				limit = len(ready)
-			}
+			limit := min(len(ready), 10000)
 			for _, job := range ready[:limit] {
 				// Set io
 				job.Status = InFlight
@@ -113,50 +99,3 @@ func (c *Consumer) Run(queue string, concurrency int) {
 		}
 	}
 }
-
-// Add worker pool per consumer to pick jobs off concurrently
-// So maybe you have your concurrency and options and shit in here
-// func (c *Consumer) Run(queue string) {
-// 	for {
-// 		if len(c.reserved) > 0 {
-// 			// Drain the queue, each iter we shift off the front, not great
-// 			for len(c.reserved) > 0 {
-// 				time.Sleep(250 * time.Millisecond)
-// 				// This updates in the store cause we have a pointer
-// 				c.reserved[0].Status = Succeeded
-// 				fmt.Println("Completed Job", c.reserved[0].ID)
-//
-// 				snapshot := []Status{}
-//
-// 				for _, j := range store {
-// 					snapshot = append(snapshot, j.Status)
-// 				}
-// 				fmt.Println("Snapshot", snapshot)
-// 				// Remove from reserved, maintained in the store
-// 				c.reserved = c.reserved[1:]
-// 			}
-// 		} else {
-// 			// fetch jobs set them to pending/reserved
-// 			ready := []*Job{}
-//
-// 			for _, job := range store {
-// 				if job.Status == Ready {
-// 					ready = append(ready, job)
-// 				}
-// 			}
-//
-// 			// Update all status to InFlight and send batch to consumer
-// 			if len(ready) > 0 {
-// 				for _, job := range ready {
-// 					job.Status = InFlight
-// 				}
-// 				c.reserved = append(c.reserved, ready...)
-// 			} else {
-// 				// No jobs ready in the store, timeout
-// 				// sleep 1000 to avoid query per loop
-// 				time.Sleep(1000 * time.Millisecond)
-// 				fmt.Println("No more jobs, waiting...")
-// 			}
-// 		}
-// 	}
-// }
