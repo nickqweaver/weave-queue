@@ -4,10 +4,11 @@ import queue "github.com/nickqweaver/job-queue/internal"
 
 func main() {
 	producer := queue.Producer{}
-	for id := 1; id <= 100; id++ {
+	for id := 1; id <= 1000000; id++ {
 		producer.Enqueue("test", id)
 	}
 
-	consumer := queue.Consumer{}
-	consumer.Run("test")
+	jobs := make(chan *queue.Job)
+	consumer := queue.Consumer{InFlight: jobs}
+	consumer.Run("test", 10)
 }
