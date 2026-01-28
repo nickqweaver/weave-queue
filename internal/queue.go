@@ -3,6 +3,8 @@ package queue
 import (
 	"fmt"
 	"time"
+
+	"github.com/nickqweaver/weave-queue/internal/store"
 )
 
 /*
@@ -28,14 +30,22 @@ Producer creates jobs and assigns to a queue (string).
 E.G -> Producer.Enqueue('image-queue', Job{})
 */
 
-var store = []*Job{}
+var storage = []*Job{}
 
-type Producer struct{}
+type Producer struct {
+	store store.Store
+}
 
-func (p Producer) Enqueue(queue string, id int) {
+func (p Producer) Enqueue(queue string, id string) {
 	// Create Job in Database with data
-	job := Job{ID: id, Status: Ready, Queue: queue}
-	store = append(store, &job)
+	job := store.Job{ID: id, Status: store.Ready, Queue: queue}
+	p.store.AddJob(job)
+}
+
+func NewProducer(store store.Store) Producer {
+	return Producer{
+		store: store,
+	}
 }
 
 type Job struct {
@@ -45,25 +55,33 @@ type Job struct {
 }
 
 type Consumer struct {
-	reserved    []*Job
-	InFlight    chan *Job
+	InFlight    chan store.Job
 	concurrency int
+	store       store.Store
 }
 
-func doWork(job *Job) {
+func doWork(job store.Job) int {
 	result := 0
-	job.Status = Succeeded
-
 	for i := range 5_000 {
 		result += i * i
 	}
-	job.Status = Succeeded
-	fmt.Println("Completed Job", job.ID, "result", result)
+	return result
 }
 
-func worker(id int, jobs <-chan *Job) {
-	for j := range jobs {
+func worker(id int, c *Consumer) {
+	for j := range c.InFlight {
+		// Pass result from callback here (or not actually )
 		doWork(j)
+		c.store.UpdateJob(j.ID, store.UpdateJob{Status: store.Succeeded})
+	}
+}
+
+func NewConsumer(s store.Store, concurrency int) Consumer {
+	jobs := make(chan store.Job)
+	return Consumer{
+		InFlight:    jobs,
+		store:       s,
+		concurrency: concurrency,
 	}
 }
 
@@ -71,7 +89,7 @@ func (c *Consumer) Run(queue string, concurrency int) {
 	// Initialize the jobs channel
 	// Spawn the workers...
 	for w := 1; w <= concurrency; w++ {
-		go worker(w, c.InFlight)
+		go worker(w, c)
 	}
 
 	for {
@@ -79,7 +97,7 @@ func (c *Consumer) Run(queue string, concurrency int) {
 
 		// This wouldn't pull every job that is ready ideally we would batch them up
 		// And we woudn't want to query every loop would we
-		for _, job := range store {
+		for _, job := range storage {
 			if job.Status == Ready {
 				ready = append(ready, job)
 			}

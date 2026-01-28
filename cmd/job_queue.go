@@ -1,9 +1,14 @@
 package main
 
-import queue "github.com/nickqweaver/job-queue/internal"
+import (
+	queue "github.com/nickqweaver/weave-queue/internal"
+	memory "github.com/nickqweaver/weave-queue/internal/store/adapters/memory"
+)
 
 func main() {
-	producer := queue.Producer{}
+	mem := memory.NewMemoryStore()
+	producer := queue.NewProducer(mem)
+
 	for id := 1; id <= 1000000; id++ {
 		producer.Enqueue("test", id)
 	}
