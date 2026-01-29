@@ -16,21 +16,21 @@ So we have an entity Queue
 4. Removes job/marks done/delete when ack
 5. Re asssign when noAck
 */
-type Status int
-
-const (
-	Ready Status = iota
-	InFlight
-	Failed
-	Succeeded
-)
+// type Status int
+//
+// const (
+// 	Ready Status = iota
+// 	InFlight
+// 	Failed
+// 	Succeeded
+// )
 
 /*
 Producer creates jobs and assigns to a queue (string).
 E.G -> Producer.Enqueue('image-queue', Job{})
 */
 
-var storage = []*Job{}
+// var storage = []*Job{}
 
 type Producer struct {
 	store store.Store
@@ -48,11 +48,11 @@ func NewProducer(store store.Store) Producer {
 	}
 }
 
-type Job struct {
-	ID     int
-	Queue  string
-	Status Status
-}
+// type Job struct {
+// 	ID     int
+// 	Queue  string
+// 	Status store.Status
+// }
 
 type Consumer struct {
 	InFlight    chan store.Job
@@ -73,6 +73,7 @@ func worker(id int, c *Consumer) {
 		// Pass result from callback here (or not actually )
 		doWork(j)
 		c.store.UpdateJob(j.ID, store.UpdateJob{Status: store.Succeeded})
+		fmt.Printf("Worker %d: completed job %s\n", id, j.ID)
 	}
 }
 
@@ -93,12 +94,12 @@ func (c *Consumer) Run(queue string, concurrency int) {
 	}
 
 	for {
-		ready := []*Job{}
+		ready := []store.Job{}
 
 		// This wouldn't pull every job that is ready ideally we would batch them up
 		// And we woudn't want to query every loop would we
-		for _, job := range storage {
-			if job.Status == Ready {
+		for _, job := range c.store.FetchJobs(store.Ready, 0, 20) {
+			if job.Status == store.Ready {
 				ready = append(ready, job)
 			}
 		}
@@ -107,7 +108,7 @@ func (c *Consumer) Run(queue string, concurrency int) {
 			limit := min(len(ready), 10000)
 			for _, job := range ready[:limit] {
 				// Set io
-				job.Status = InFlight
+				job.Status = store.InFlight
 				c.InFlight <- job
 			}
 		} else {

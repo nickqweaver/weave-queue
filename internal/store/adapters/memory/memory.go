@@ -24,7 +24,7 @@ func (n *MemoryStore) AddJob(job store.Job) {
 
 func (n *MemoryStore) UpdateJob(id string, update store.UpdateJob) {
 	jobs := n.jobs
-	for i, v := range jobs {
+	for i := range jobs {
 		if jobs[i].ID == id {
 			jobs[i].Status = update.Status
 			return
