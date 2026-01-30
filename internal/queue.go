@@ -86,6 +86,7 @@ type Res struct {
 	Status  Status
 	ID      string
 	Message string
+	From    int
 }
 
 type Req struct {
@@ -132,6 +133,7 @@ func worker(id int, req <-chan Req, res chan<- Res) {
 				Status:  NAck,
 				Message: err.Error(),
 				ID:      j.ID,
+				From:    id,
 			}
 
 			res <- response
@@ -141,6 +143,7 @@ func worker(id int, req <-chan Req, res chan<- Res) {
 				Status:  Ack,
 				Message: fmt.Sprintf("Successfully completed Job %s", j.ID),
 				ID:      j.ID,
+				From:    id,
 			}
 			res <- response
 		}
@@ -150,7 +153,7 @@ func worker(id int, req <-chan Req, res chan<- Res) {
 
 func NewConsumer(s store.Store, concurrency int) Consumer {
 	req := make(chan Req, 1000)
-	res := make(chan Res)
+	res := make(chan Res, 50)
 
 	go func() {
 		for r := range res {
