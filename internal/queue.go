@@ -149,7 +149,7 @@ func worker(id int, req <-chan Req, res chan<- Res) {
 }
 
 func NewConsumer(s store.Store, concurrency int) Consumer {
-	req := make(chan Req)
+	req := make(chan Req, 1000)
 	res := make(chan Res)
 
 	go func() {
@@ -181,37 +181,25 @@ func (c *Consumer) Run(queue string, concurrency int) {
 
 	for {
 		ready := []store.Job{}
-
-		// This wouldn't pull every job that is ready ideally we would batch them up
-		// And we woudn't want to query every loop would we
-		for _, job := range c.store.FetchJobs(store.Ready, 0, 100) {
-			if job.Status == store.Ready {
-				ready = append(ready, job)
+		// We only fetch new jobs when the buffer has >= 50% capacity
+		if len(c.InFlight.Req) < 500 {
+			for _, job := range c.store.FetchJobs(store.Ready, 0, 100) {
+				if job.Status == store.Ready {
+					ready = append(ready, job)
+				}
 			}
-		}
-		// If the inflight channel is empty queue up more, but also store would have to have some
-		if len(c.InFlight.Req) == 0 && len(ready) > 0 {
-			limit := min(len(ready), 10000)
+			limit := min(len(ready), 100)
 			// We would batch update the store here
 			for _, job := range ready[:limit] {
-				job.Status = store.InFlight
+				c.store.UpdateJob(job.ID, store.UpdateJob{Status: store.InFlight})
 			}
 			// Now we are safe to send these jobs
 			for _, job := range ready[:limit] {
 				c.InFlight.Req <- Req{Job: job}
 			}
 
-		} else {
-			// Wait to re check
-			fmt.Println("No jobs left waiting...")
-			failed := 0
-			for _, job := range c.store.FetchJobs(store.Failed, 0, 100) {
-				if job.Status == store.Failed {
-					failed++
-				}
-			}
-			fmt.Println("Failed Jobs: ", failed)
-			time.Sleep(5000 * time.Millisecond)
+			// Prevent Store Hammer
+			time.Sleep(10 * time.Millisecond)
 		}
 	}
 }
