@@ -48,11 +48,14 @@ func NewProducer(store store.Store) Producer {
 	}
 }
 
-// type Job struct {
-// 	ID     int
-// 	Queue  string
-// 	Status store.Status
-// }
+// Unknowns
+// API not sure I love
+// Can't shut down?
+// Workers stay open forever?
+// Better way to batch enqueu jobs?
+
+// TODO:
+// Offset/limit in memory
 
 type Consumer struct {
 	InFlight    chan store.Job
@@ -98,7 +101,7 @@ func (c *Consumer) Run(queue string, concurrency int) {
 
 		// This wouldn't pull every job that is ready ideally we would batch them up
 		// And we woudn't want to query every loop would we
-		for _, job := range c.store.FetchJobs(store.Ready, 0, 20) {
+		for _, job := range c.store.FetchJobs(store.Ready, 0, 100) {
 			if job.Status == store.Ready {
 				ready = append(ready, job)
 			}
