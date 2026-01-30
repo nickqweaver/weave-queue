@@ -192,11 +192,15 @@ func (c *Consumer) Run(queue string, concurrency int) {
 		// If the inflight channel is empty queue up more, but also store would have to have some
 		if len(c.InFlight.Req) == 0 && len(ready) > 0 {
 			limit := min(len(ready), 10000)
+			// We would batch update the store here
 			for _, job := range ready[:limit] {
-				// Set io
 				job.Status = store.InFlight
+			}
+			// Now we are safe to send these jobs
+			for _, job := range ready[:limit] {
 				c.InFlight.Req <- Req{Job: job}
 			}
+
 		} else {
 			// Wait to re check
 			fmt.Println("No jobs left waiting...")
