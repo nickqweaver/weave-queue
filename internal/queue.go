@@ -1,7 +1,9 @@
 package queue
 
 import (
+	"errors"
 	"fmt"
+	"strconv"
 	"time"
 
 	"github.com/nickqweaver/weave-queue/internal/store"
@@ -53,37 +55,118 @@ func NewProducer(store store.Store) Producer {
 // Can't shut down?
 // Workers stay open forever?
 // Better way to batch enqueu jobs?
+// TODO: We need to revisit select patterns and really understand when stuff is blocking
 
 // TODO:
 // Offset/limit in memory
 
+// Where can we fail/hang/stop?
+/**
+1. Job can take too long (exceed timeoutIn)
+		- queue should update job status to retry, and increment retries
+2. Job can panic/throw -> Worker should nack
+		- worker should notify queue nack/reject
+		- queue should update to failed or send to dlq
+3. Worker never acks/Queue never recieves ack
+		- Timeout will trigger, job we will re run (therefor jobs should be idempotent)
+4. Process exits
+		- No longer accept any more jobs in flight, gracefully finish remaining jobs in workers and shutdown all workers
+5. Process crashes
+		- Jobs should be persisted in flight status during crash. If this happens on reboot we should prioritize in flight jobs first
+*/
+
+type Status int
+
+const (
+	Ack Status = iota
+	NAck
+)
+
+type Res struct {
+	Status  Status
+	ID      string
+	Message string
+}
+
+type Req struct {
+	Job store.Job
+}
+
+type InFlight struct {
+	Req chan Req
+	Res chan Res
+}
+
 type Consumer struct {
-	InFlight    chan store.Job
+	InFlight    InFlight
 	concurrency int
 	store       store.Store
 }
 
-func doWork(job store.Job) int {
+func doWork(job store.Job) (bool, error) {
 	result := 0
 	for i := range 5_000 {
 		result += i * i
 	}
-	return result
+	n, err := strconv.Atoi(job.ID)
+	if err != nil {
+		return false, errors.New("Failed to convert string to int")
+	}
+
+	if n%2 == 0 {
+		return false, errors.New("Failed job cause its even")
+	}
+
+	return true, nil
 }
 
-func worker(id int, c *Consumer) {
-	for j := range c.InFlight {
-		// Pass result from callback here (or not actually )
-		doWork(j)
-		c.store.UpdateJob(j.ID, store.UpdateJob{Status: store.Succeeded})
-		fmt.Printf("Worker %d: completed job %s\n", id, j.ID)
+// Maybe we change this to a req/response multi channel
+// Then worker can recieve jobs on the inflight channel and push responses out nack/ack
+func worker(id int, req <-chan Req, res chan<- Res) {
+	// TODO: do something with the worker ID
+	for r := range req {
+		j := r.Job
+		// Handler placeholder, should return ok, err then we can ack/nack based on that
+		if _, err := doWork(j); err != nil {
+			response := Res{
+				Status:  NAck,
+				Message: err.Error(),
+				ID:      j.ID,
+			}
+
+			res <- response
+		} else {
+
+			response := Res{
+				Status:  Ack,
+				Message: fmt.Sprintf("Successfully completed Job %s", j.ID),
+				ID:      j.ID,
+			}
+			res <- response
+		}
+
 	}
 }
 
 func NewConsumer(s store.Store, concurrency int) Consumer {
-	jobs := make(chan store.Job)
+	req := make(chan Req)
+	res := make(chan Res)
+
+	go func() {
+		for r := range res {
+			switch r.Status {
+			case Ack:
+				fmt.Println("Completed Job ", r.ID)
+				s.UpdateJob(r.ID, store.UpdateJob{Status: store.Succeeded})
+			case NAck:
+				s.UpdateJob(r.ID, store.UpdateJob{Status: store.Failed})
+				fmt.Println("Failed Job")
+			}
+		}
+	}()
+
 	return Consumer{
-		InFlight:    jobs,
+		InFlight:    InFlight{Req: req, Res: res},
 		store:       s,
 		concurrency: concurrency,
 	}
@@ -93,7 +176,7 @@ func (c *Consumer) Run(queue string, concurrency int) {
 	// Initialize the jobs channel
 	// Spawn the workers...
 	for w := 1; w <= concurrency; w++ {
-		go worker(w, c)
+		go worker(w, c.InFlight.Req, c.InFlight.Res)
 	}
 
 	for {
@@ -107,17 +190,24 @@ func (c *Consumer) Run(queue string, concurrency int) {
 			}
 		}
 		// If the inflight channel is empty queue up more, but also store would have to have some
-		if len(c.InFlight) == 0 && len(ready) > 0 {
+		if len(c.InFlight.Req) == 0 && len(ready) > 0 {
 			limit := min(len(ready), 10000)
 			for _, job := range ready[:limit] {
 				// Set io
 				job.Status = store.InFlight
-				c.InFlight <- job
+				c.InFlight.Req <- Req{Job: job}
 			}
 		} else {
 			// Wait to re check
 			fmt.Println("No jobs left waiting...")
-			time.Sleep(250 * time.Millisecond)
+			failed := 0
+			for _, job := range c.store.FetchJobs(store.Failed, 0, 100) {
+				if job.Status == store.Failed {
+					failed++
+				}
+			}
+			fmt.Println("Failed Jobs: ", failed)
+			time.Sleep(5000 * time.Millisecond)
 		}
 	}
 }

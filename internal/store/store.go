@@ -10,13 +10,15 @@ const (
 )
 
 type Job struct {
-	ID     string
-	Queue  string
-	Status Status
+	ID      string
+	Queue   string
+	Status  Status
+	Timeout int
 }
 
 type UpdateJob struct {
-	Status Status
+	Status  Status
+	Retries *int
 }
 
 type Store interface {
