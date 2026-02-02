@@ -16,14 +16,14 @@ type Job struct {
 	Timeout int
 }
 
-type UpdateJob struct {
+type JobUpdate struct {
 	Status  Status
 	Retries *int
 }
 
 type Store interface {
-	FetchJobs(status Status, offset int, limit int) []Job
+	FetchJobs(status Status, limit int) []Job
 	FailJob(id string)
 	AddJob(job Job)
-	UpdateJob(id string, update UpdateJob)
+	UpdateJob(id string, update JobUpdate)
 }

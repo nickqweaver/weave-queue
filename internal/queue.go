@@ -151,19 +151,33 @@ func worker(id int, req <-chan Req, res chan<- Res) {
 	}
 }
 
+// TODO: Experiment with having a few channels compared to just using a mutex (pull lock, update, release)
+// TODO: Also think we should have queue and change API to have Task instead of this consumer/producer theoretical type api
 func NewConsumer(s store.Store, concurrency int) Consumer {
 	req := make(chan Req, 1000)
 	res := make(chan Res, 50)
 
+	var batch []Res
+
+	batchWrite := func(res []Res) {
+		for _, r := range res {
+			if r.Status == Ack {
+				s.UpdateJob(r.ID, store.JobUpdate{Status: store.Succeeded})
+			} else {
+				s.UpdateJob(r.ID, store.JobUpdate{Status: store.Failed})
+			}
+		}
+	}
+
 	go func() {
 		for r := range res {
-			switch r.Status {
-			case Ack:
-				fmt.Println("Completed Job ", r.ID)
-				s.UpdateJob(r.ID, store.UpdateJob{Status: store.Succeeded})
-			case NAck:
-				s.UpdateJob(r.ID, store.UpdateJob{Status: store.Failed})
-				fmt.Println("Failed Job")
+			batch = append(batch, r)
+
+			if len(batch) == cap(res) {
+				// batch update
+				batchWrite(batch)
+				fmt.Println("Writing a batch!", len(batch))
+				batch = []Res{}
 			}
 		}
 	}()
@@ -186,7 +200,7 @@ func (c *Consumer) Run(queue string, concurrency int) {
 		ready := []store.Job{}
 		// We only fetch new jobs when the buffer has >= 50% capacity
 		if len(c.InFlight.Req) < 500 {
-			for _, job := range c.store.FetchJobs(store.Ready, 0, 100) {
+			for _, job := range c.store.FetchJobs(store.Ready, 100) {
 				if job.Status == store.Ready {
 					ready = append(ready, job)
 				}
@@ -194,7 +208,7 @@ func (c *Consumer) Run(queue string, concurrency int) {
 			limit := min(len(ready), 100)
 			// We would batch update the store here
 			for _, job := range ready[:limit] {
-				c.store.UpdateJob(job.ID, store.UpdateJob{Status: store.InFlight})
+				c.store.UpdateJob(job.ID, store.JobUpdate{Status: store.InFlight})
 			}
 			// Now we are safe to send these jobs
 			for _, job := range ready[:limit] {
