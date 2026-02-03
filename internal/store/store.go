@@ -23,6 +23,7 @@ type JobUpdate struct {
 
 type Store interface {
 	FetchJobs(status Status, limit int) []Job
+	FetchAndClaim(curr Status, to Status, limit int) []Job
 	FailJob(id string)
 	AddJob(job Job)
 	UpdateJob(id string, update JobUpdate)

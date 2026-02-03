@@ -35,6 +35,25 @@ func (n *MemoryStore) FetchJobs(status store.Status, limit int) []store.Job {
 	return filtered
 }
 
+func (n *MemoryStore) FetchAndClaim(curr store.Status, to store.Status, limit int) []store.Job {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	var filtered []store.Job
+
+	for i, j := range n.jobs {
+		if j.Status == curr {
+			n.jobs[i].Status = to
+			filtered = append(filtered, n.jobs[i])
+			if len(filtered) == limit {
+				return filtered
+			}
+		}
+	}
+
+	// Fallback if we don't have n limit items to return
+	return filtered
+}
+
 func (n *MemoryStore) FailJob(id string) {}
 
 func (n *MemoryStore) AddJob(job store.Job) {
