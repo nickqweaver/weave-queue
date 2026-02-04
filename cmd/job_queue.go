@@ -40,17 +40,20 @@ func main() {
 	// consumer.Run("test", 10)
 
 	// f := queue.Fetcher{BatchSize: 100, MaxRetries: 3, MaxColdTimeout: 30_000}
-	q := queue.NewQueue(mem)
 
 	// for id := 1; id <= 100_000; id++ {
 	// 	q.Enqueue(id)
 	// }
+	server := queue.NewServer(mem)
+	client := queue.NewClient(mem)
+
+	server.Run()
 
 	func() {
 		for tick := range time.Tick(6 * time.Second) {
 			fmt.Println("More Jobs Incomming", tick)
 			for id := 1; id <= 1000; id++ {
-				q.Enqueue(id)
+				client.Enqueue(id)
 			}
 		}
 	}()

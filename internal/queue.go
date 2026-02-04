@@ -45,8 +45,8 @@ func (p Producer) Enqueue(queue string, id string) {
 	p.store.AddJob(job)
 }
 
-func NewProducer(store store.Store) Producer {
-	return Producer{
+func NewProducer(store store.Store) *Producer {
+	return &Producer{
 		store: store,
 	}
 }
@@ -266,34 +266,42 @@ func (f *Fetcher) Fetch(s store.Store, p chan<- Req) {
 	}
 }
 
-type Queue struct {
+type Server struct {
 	// fetcher Fetcher
 	Store    store.Store
 	fetcher  Fetcher
-	producer Producer
 	consumer Consumer
 	// Close fn to shut everything down gracefully
 }
 
-func NewQueue(s store.Store) Queue {
+func NewServer(s store.Store) Server {
 	fetcher := Fetcher{BatchSize: 100, MaxRetries: 3, MaxColdTimeout: 5000}
 	pending := make(chan Req, 1000)
 	finished := make(chan Res, 20)
 
 	consumer := NewConsumer(s, 4, pending, finished)
-	producer := NewProducer(s)
-	q := Queue{Store: s, consumer: consumer, producer: producer, fetcher: fetcher}
+	server := Server{Store: s, consumer: consumer, fetcher: fetcher}
 
-	q.Run(pending)
-	return q
+	return server
 }
 
-func (q *Queue) Run(pending chan Req) {
-	go q.fetcher.Fetch(q.Store, pending)
-
-	q.consumer.Run("job_queue")
+// THIS needs to block main and keep the process alive
+func (s *Server) Run() {
+	go s.fetcher.Fetch(s.Store, s.consumer.InFlight.Req)
+	s.consumer.Run("job_queue")
 }
 
-func (q *Queue) Enqueue(j int) {
-	q.producer.Enqueue("job_queue", strconv.Itoa(j))
+type Client struct {
+	producer *Producer
+}
+
+// This is the client
+func (c *Client) Enqueue(j int) {
+	c.producer.Enqueue("job_queue", strconv.Itoa(j))
+}
+
+func NewClient(s store.Store) *Client {
+	p := NewProducer(s)
+
+	return &Client{producer: p}
 }
