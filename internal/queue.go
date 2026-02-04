@@ -3,6 +3,7 @@ package queue
 import (
 	"errors"
 	"fmt"
+	"math/rand/v2"
 	"strconv"
 	"time"
 
@@ -153,10 +154,7 @@ func worker(id int, req <-chan Req, res chan<- Res) {
 
 // TODO: Experiment with having a few channels compared to just using a mutex (pull lock, update, release)
 // TODO: Also think we should have queue and change API to have Task instead of this consumer/producer theoretical type api
-func NewConsumer(s store.Store, concurrency int) Consumer {
-	req := make(chan Req, 1000)
-	res := make(chan Res, 50)
-
+func NewConsumer(s store.Store, concurrency int, req chan Req, res chan Res) Consumer {
 	var batch []Res
 
 	batchWrite := func(res []Res) {
@@ -189,34 +187,113 @@ func NewConsumer(s store.Store, concurrency int) Consumer {
 	}
 }
 
-func (c *Consumer) Run(queue string, concurrency int) {
+func (c *Consumer) Run(queue string) {
 	// Initialize the jobs channel
 	// Spawn the workers...
-	for w := 1; w <= concurrency; w++ {
+	for w := 1; w <= c.concurrency; w++ {
 		go worker(w, c.InFlight.Req, c.InFlight.Res)
 	}
+}
+
+type Fetcher struct {
+	BatchSize      int
+	MaxRetries     int
+	MaxColdTimeout int
+}
+
+/*
+*
+
+		The fetcher is responsible for fetching data from the store and
+
+
+		sending it to the pending Queue. It should determine priority? (this im unsure but dont see another way)
+
+	  - Ah maybe... We have 2/3 channels. New jobs, failed jobs, timeoutjobs? Or maybe just new/retry. Then the queue can determine
+	    the worker priority? Maybe we have 3 fetchers too?
+	    food for thought
+	  - The queue will launch this in a go routine
+
+	  - IDEA queue to have temperatures (Cold warm hot and that scales things down or increases resources)
+*/
+
+func backoff(timeout int, maximum int, jitter bool) (int, time.Duration) {
+	fmt.Println("TIMEOUT -> ", timeout)
+	exponential := min(timeout*2, maximum)
+
+	// Full jitter
+	if jitter {
+		rnd := rand.IntN(exponential)
+		fmt.Println("RND -> ", rnd)
+		fmt.Println("Timeout -> ", exponential-rnd)
+		return exponential, time.Duration(exponential - rnd)
+	}
+
+	return exponential, time.Duration(exponential)
+}
+
+func (f *Fetcher) Fetch(s store.Store, p chan<- Req) {
+	missed := 0
+	wait := 100
+	timeout := time.Duration(0)
 
 	for {
-		ready := []store.Job{}
-		// We only fetch new jobs when the buffer has >= 50% capacity
-		if len(c.InFlight.Req) < 500 {
-			for _, job := range c.store.FetchJobs(store.Ready, 100) {
-				if job.Status == store.Ready {
-					ready = append(ready, job)
-				}
-			}
-			limit := min(len(ready), 100)
-			// We would batch update the store here
-			for _, job := range ready[:limit] {
-				c.store.UpdateJob(job.ID, store.JobUpdate{Status: store.InFlight})
-			}
-			// Now we are safe to send these jobs
-			for _, job := range ready[:limit] {
-				c.InFlight.Req <- Req{Job: job}
-			}
+		ready := s.FetchAndClaim(store.Ready, store.InFlight, 100)
 
-			// Prevent Store Hammer
-			time.Sleep(10 * time.Millisecond)
+		if len(ready) == 0 {
+			missed++
+		} else {
+			// Send to pending Queue
+			for _, j := range ready {
+				p <- Req{Job: j}
+			}
+			// Reset
+			missed = 0
+			wait = 100
+			timeout = time.Duration(0)
 		}
+
+		if missed > 1 {
+			wait, timeout = backoff(wait, f.MaxColdTimeout, true)
+			time.Sleep(time.Millisecond * time.Duration(timeout))
+		}
+
+		// Send the batch to the pending channel
+		// for _, job := range ready {
+		// 	fmt.Println("Job IS ", job.ID, job.Status)
+		// }
+
 	}
+}
+
+type Queue struct {
+	// fetcher Fetcher
+	Store    store.Store
+	fetcher  Fetcher
+	producer Producer
+	consumer Consumer
+	// Close fn to shut everything down gracefully
+}
+
+func NewQueue(s store.Store) Queue {
+	fetcher := Fetcher{BatchSize: 100, MaxRetries: 3, MaxColdTimeout: 5000}
+	pending := make(chan Req, 1000)
+	finished := make(chan Res, 20)
+
+	consumer := NewConsumer(s, 4, pending, finished)
+	producer := NewProducer(s)
+	q := Queue{Store: s, consumer: consumer, producer: producer, fetcher: fetcher}
+
+	q.Run(pending)
+	return q
+}
+
+func (q *Queue) Run(pending chan Req) {
+	go q.fetcher.Fetch(q.Store, pending)
+
+	q.consumer.Run("job_queue")
+}
+
+func (q *Queue) Enqueue(j int) {
+	q.producer.Enqueue("job_queue", strconv.Itoa(j))
 }
