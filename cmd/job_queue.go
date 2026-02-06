@@ -61,3 +61,15 @@ func main() {
 
 	// f.Fetch(mem)
 }
+
+// TODO Next Steps
+// Cleanup Code/API
+// Split modules up into their own files
+// cleanup functions as struct methods
+// config options for hard coded values
+// stub out temperature states
+// Determine if the for select default in fetcher is best practice
+// Error handling, just do it now
+
+// Then next phase is tasks, how we are going to pass real tasks on the queue
+// How we wanna shape our Task Registry, etc..
