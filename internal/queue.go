@@ -7,6 +7,7 @@ import (
 	"math/rand/v2"
 	"os/signal"
 	"strconv"
+	"sync"
 	"syscall"
 	"time"
 
@@ -127,8 +128,7 @@ func doWork(job store.Job) (bool, error) {
 
 // Maybe we change this to a req/response multi channel
 // Then worker can recieve jobs on the inflight channel and push responses out nack/ack
-func worker(id int, req <-chan Req, res chan<- Res) {
-	// TODO: do something with the worker ID
+func worker(ctx context.Context, id int, req <-chan Req, res chan<- Res) {
 	for r := range req {
 		j := r.Job
 		// Handler placeholder, should return ok, err then we can ack/nack based on that
@@ -142,7 +142,6 @@ func worker(id int, req <-chan Req, res chan<- Res) {
 
 			res <- response
 		} else {
-
 			response := Res{
 				Status:  Ack,
 				Message: fmt.Sprintf("Successfully completed Job %s", j.ID),
@@ -190,11 +189,18 @@ func NewConsumer(s store.Store, concurrency int, req chan Req, res chan Res) Con
 	}
 }
 
-func (c *Consumer) Run(queue string) {
+var wg sync.WaitGroup
+
+func (c *Consumer) Run(ctx context.Context, queue string) {
 	// Initialize the jobs channel
 	// Spawn the workers...
+
+	wg.Add(c.concurrency)
 	for w := 1; w <= c.concurrency; w++ {
-		go worker(w, c.InFlight.Req, c.InFlight.Res)
+		go func(id int) {
+			defer wg.Done()
+			worker(ctx, w, c.InFlight.Req, c.InFlight.Res)
+		}(w)
 	}
 }
 
@@ -239,8 +245,9 @@ func (f *Fetcher) Fetch(ctx context.Context, s store.Store, p chan<- Req) {
 	missed := 0
 	wait := 100
 	timeout := time.Duration(0)
-	// Cleanup, add this to the struct
+	// Cleanup, add this to the struct, closes the pending channel, workers will stop
 	defer func() {
+		close(p)
 		fmt.Println("Cleaning up Fetcher...")
 		time.Sleep(time.Second * 3)
 	}()
@@ -289,9 +296,9 @@ type Server struct {
 }
 
 func NewServer(s store.Store) Server {
-	fetcher := Fetcher{BatchSize: 100, MaxRetries: 3, MaxColdTimeout: 5000}
+	fetcher := Fetcher{BatchSize: 1000, MaxRetries: 3, MaxColdTimeout: 5000}
 	pending := make(chan Req, 1000)
-	finished := make(chan Res, 20)
+	finished := make(chan Res, 100)
 
 	consumer := NewConsumer(s, 4, pending, finished)
 	server := Server{Store: s, consumer: consumer, fetcher: fetcher}
@@ -302,8 +309,9 @@ func NewServer(s store.Store) Server {
 func (s *Server) Run() {
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
+
 	go s.fetcher.Fetch(ctx, s.Store, s.consumer.InFlight.Req)
-	s.consumer.Run("job_queue")
+	s.consumer.Run(ctx, "job_queue")
 
 	select {
 	case <-ctx.Done():
