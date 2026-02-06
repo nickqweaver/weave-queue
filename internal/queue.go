@@ -1,10 +1,13 @@
 package queue
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"math/rand/v2"
+	"os/signal"
 	"strconv"
+	"syscall"
 	"time"
 
 	"github.com/nickqweaver/weave-queue/internal/store"
@@ -232,12 +235,23 @@ func backoff(timeout int, maximum int, jitter bool) (int, time.Duration) {
 	return exponential, time.Duration(exponential)
 }
 
-func (f *Fetcher) Fetch(s store.Store, p chan<- Req) {
+func (f *Fetcher) Fetch(ctx context.Context, s store.Store, p chan<- Req) {
 	missed := 0
 	wait := 100
 	timeout := time.Duration(0)
+	// Cleanup, add this to the struct
+	defer func() {
+		fmt.Println("Cleaning up Fetcher...")
+		time.Sleep(time.Second * 3)
+	}()
 
 	for {
+		select {
+		case <-ctx.Done():
+			fmt.Println("Shutting Fetcher Down...")
+			return
+		default:
+		}
 		ready := s.FetchAndClaim(store.Ready, store.InFlight, 100)
 
 		if len(ready) == 0 {
@@ -285,10 +299,24 @@ func NewServer(s store.Store) Server {
 	return server
 }
 
-// THIS needs to block main and keep the process alive
 func (s *Server) Run() {
-	go s.fetcher.Fetch(s.Store, s.consumer.InFlight.Req)
+	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	defer stop()
+	go s.fetcher.Fetch(ctx, s.Store, s.consumer.InFlight.Req)
 	s.consumer.Run("job_queue")
+
+	select {
+	case <-ctx.Done():
+		s.cleanup()
+		fmt.Println("Goodbye")
+	}
+}
+
+func (s *Server) cleanup() {
+	// cleanup will call all asset
+	fmt.Println()
+	fmt.Println("\nGracefully shutting down..")
+	time.Sleep(time.Second * 5)
 }
 
 type Client struct {

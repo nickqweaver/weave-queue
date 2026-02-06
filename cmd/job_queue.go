@@ -1,9 +1,7 @@
 package main
 
 import (
-	"fmt"
 	"strconv"
-	"time"
 
 	queue "github.com/nickqweaver/weave-queue/internal"
 	"github.com/nickqweaver/weave-queue/internal/store"
@@ -46,17 +44,20 @@ func main() {
 	// }
 	server := queue.NewServer(mem)
 	client := queue.NewClient(mem)
+	for id := 1; id <= 100000; id++ {
+		client.Enqueue(id)
+	}
 
 	server.Run()
 
-	func() {
-		for tick := range time.Tick(6 * time.Second) {
-			fmt.Println("More Jobs Incomming", tick)
-			for id := 1; id <= 1000; id++ {
-				client.Enqueue(id)
-			}
-		}
-	}()
+	// func() {
+	// 	for tick := range time.Tick(6 * time.Second) {
+	// 		fmt.Println("More Jobs Incomming", tick)
+	// 		for id := 1; id <= 1000; id++ {
+	// 			client.Enqueue(id)
+	// 		}
+	// 	}
+	// }()
 
 	// f.Fetch(mem)
 }
