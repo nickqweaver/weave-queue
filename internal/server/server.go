@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os/signal"
+	"sync"
 	"syscall"
 	"time"
 
@@ -54,12 +55,27 @@ func (s *Server) Run() {
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
-	go s.committer.run()
-	go s.consumer.Run(ctx, "my_queue")
-	go s.fetcher.fetch(ctx, s.store)
+	var wg sync.WaitGroup
+	wg.Add(3)
+
+	go func() {
+		defer wg.Done()
+		s.committer.run()
+	}()
+
+	go func() {
+		defer wg.Done()
+		s.consumer.Run(ctx, "my_queue")
+	}()
+
+	go func() {
+		defer wg.Done()
+		s.fetcher.fetch(ctx, s.store)
+	}()
 
 	select {
 	case <-ctx.Done():
+		wg.Wait()
 		s.Cleanup()
 		fmt.Println("Goodbye")
 	}
