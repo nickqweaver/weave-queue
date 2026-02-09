@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"fmt"
 	"sync"
 )
 
@@ -22,7 +23,13 @@ func NewConsumer(concurrency int, req chan Req, res chan Res) *Consumer {
 	}
 }
 
+func (c *Consumer) Cleanup() {
+	fmt.Println("Shutting down consumer, closing response channel")
+	close(c.pending.res)
+}
+
 func (c *Consumer) Run(ctx context.Context, queue string) {
+	defer c.Cleanup()
 	var wg sync.WaitGroup
 	wg.Add(c.concurrency)
 
@@ -34,4 +41,6 @@ func (c *Consumer) Run(ctx context.Context, queue string) {
 			w.Run(ctx)
 		}(w)
 	}
+	// Wait till all workers have finished
+	wg.Wait()
 }
