@@ -55,12 +55,20 @@ func main() {
 
 	server := server.NewServer(mem)
 	client := client.NewClient(mem)
+	for id := 1; id <= 100_000; id++ {
+		client.Enqueue("my_queue", strconv.Itoa(id))
+	}
+	nextID := 100_001
 
-	func() {
-		for tick := range time.Tick(6 * time.Second) {
-			fmt.Println("More Jobs Incomming", tick)
-			for id := 1; id <= 1000; id++ {
-				client.Enqueue("my_queue", strconv.Itoa(id))
+	go func() {
+		ticker := time.NewTicker(6 * time.Second)
+		defer ticker.Stop()
+
+		for tick := range ticker.C {
+			fmt.Println("More Jobs Incoming", tick)
+			for i := 0; i < 1_000; i++ {
+				client.Enqueue("my_queue", strconv.Itoa(nextID))
+				nextID++
 			}
 		}
 	}()
