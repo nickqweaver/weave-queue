@@ -41,22 +41,22 @@ func NewServer(s store.Store) Server {
 	finished := make(chan Res, 100)
 
 	consumer := NewConsumer(4, pending, finished)
-	committer := NewCommiter(s)
+	committer := NewCommiter(s, finished)
 	fetcher := NewFetcher(pending, 250, 3, 5000)
 	server := Server{store: s, consumer: consumer, fetcher: fetcher, committer: committer}
+	fmt.Println("Created Server")
 
 	return server
 }
 
 func (s *Server) Run() {
+	fmt.Println("Running Server...")
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
 	go s.committer.run()
 	go s.consumer.Run(ctx, "my_queue")
 	go s.fetcher.fetch(ctx, s.store)
-
-	s.consumer.Run(ctx, "job_queue")
 
 	select {
 	case <-ctx.Done():

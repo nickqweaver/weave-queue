@@ -30,7 +30,7 @@ func (c *Consumer) Run(ctx context.Context, queue string) {
 	for w := 1; w <= c.concurrency; w++ {
 		go func(id int) {
 			defer wg.Done()
-			w := NewWorker(w, c.pending.req, c.pending.res)
+			w := NewWorker(id, c.pending.req, c.pending.res)
 			w.Run(ctx)
 		}(w)
 	}

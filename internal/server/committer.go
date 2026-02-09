@@ -11,9 +11,10 @@ type Commiter struct {
 	res   <-chan Res
 }
 
-func NewCommiter(s store.Store) *Commiter {
+func NewCommiter(s store.Store, res chan Res) *Commiter {
 	return &Commiter{
 		store: s,
+		res:   res,
 	}
 }
 
