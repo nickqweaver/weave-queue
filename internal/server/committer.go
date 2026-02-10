@@ -29,18 +29,23 @@ func (c *Commiter) batchWrite(batch []Res) {
 }
 
 func (c *Commiter) run() {
-	go func() {
-		var batch []Res
-		for r := range c.res {
-			batch = append(batch, r)
+	batchSize := max(1, cap(c.res))
 
-			if len(batch) == cap(c.res) {
-				// batch update
-				c.batchWrite(batch)
-				fmt.Println("Writing a batch!", len(batch))
-				// Reset batch
-				batch = []Res{}
-			}
+	batch := make([]Res, 0, batchSize)
+	for r := range c.res {
+		batch = append(batch, r)
+
+		if len(batch) == batchSize {
+			c.batchWrite(batch)
+			fmt.Println("Writing a batch!", len(batch))
+			batch = batch[:0]
 		}
-	}()
+	}
+
+	if len(batch) > 0 {
+		c.batchWrite(batch)
+		fmt.Println("Flushing final batch!", len(batch))
+	}
+
+	fmt.Println("Committer stopped")
 }
