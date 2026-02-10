@@ -6,19 +6,19 @@ import (
 	"github.com/nickqweaver/weave-queue/internal/store"
 )
 
-type Commiter struct {
+type Committer struct {
 	store store.Store
 	res   <-chan Res
 }
 
-func NewCommiter(s store.Store, res chan Res) *Commiter {
-	return &Commiter{
+func NewCommitter(s store.Store, res chan Res) *Committer {
+	return &Committer{
 		store: s,
 		res:   res,
 	}
 }
 
-func (c *Commiter) batchWrite(batch []Res) {
+func (c *Committer) batchWrite(batch []Res) {
 	for _, j := range batch {
 		if j.Status == Ack {
 			c.store.UpdateJob(j.ID, store.JobUpdate{Status: store.Succeeded})
@@ -28,7 +28,7 @@ func (c *Commiter) batchWrite(batch []Res) {
 	}
 }
 
-func (c *Commiter) run() {
+func (c *Committer) run() {
 	batchSize := max(1, cap(c.res))
 
 	batch := make([]Res, 0, batchSize)

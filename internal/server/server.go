@@ -33,7 +33,7 @@ type Server struct {
 	store     store.Store
 	fetcher   *Fetcher
 	consumer  *Consumer
-	committer *Commiter
+	committer *Committer
 	// Close fn to shut everything down gracefully
 }
 
@@ -42,7 +42,7 @@ func NewServer(s store.Store) Server {
 	finished := make(chan Res, 100)
 
 	consumer := NewConsumer(4, pending, finished)
-	committer := NewCommiter(s, finished)
+	committer := NewCommitter(s, finished)
 	fetcher := NewFetcher(pending, 250, 3, 5000)
 	server := Server{store: s, consumer: consumer, fetcher: fetcher, committer: committer}
 	fmt.Println("Created Server")
