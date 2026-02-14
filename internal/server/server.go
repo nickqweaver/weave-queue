@@ -37,6 +37,8 @@ type Server struct {
 	// Close fn to shut everything down gracefully
 }
 
+type Config struct{}
+
 func NewServer(s store.Store) Server {
 	pending := make(chan Req, 1000)
 	finished := make(chan Res, 100)
@@ -73,12 +75,10 @@ func (s *Server) Run() {
 		s.fetcher.fetch(ctx, s.store)
 	}()
 
-	select {
-	case <-ctx.Done():
-		wg.Wait()
-		s.Cleanup()
-		fmt.Println("Goodbye")
-	}
+	<-ctx.Done()
+	wg.Wait()
+	s.Cleanup()
+	fmt.Println("Goodbye")
 }
 
 func (s *Server) Cleanup() {
