@@ -29,32 +29,6 @@ func addJobs(n int, p store.Store) {
 
 func main() {
 	mem := memory.NewMemoryStore()
-	// producer := queue.NewProducer(mem)
-
-	// addJobs(100_000, producer)
-
-	// go func() {
-	// 	for tick := range time.Tick(30 * time.Second) {
-	// 		fmt.Println("More Jobs Incomming", tick)
-	// 		addJobs(100_000, producer)
-	// 	}
-	// }()
-	// jobs := make(chan store.Job)
-	// consumer := queue.NewConsumer(mem, 10)
-	// consumer.Run("test", 10)
-
-	// f := queue.Fetcher{BatchSize: 100, MaxRetries: 3, MaxColdTimeout: 30_000}
-
-	// for id := 1; id <= 100_000; id++ {
-	// 	q.Enqueue(id)
-	// }
-	// server := queue.NewServer(mem)
-	// client := queue.NewClient(mem)
-	// for id := 1; id <= 100000; id++ {
-	// 	client.Enqueue(id)
-	// }
-	//
-	// server.Run()
 
 	server := server.NewServer(mem, server.Config{
 		MaxColdTimeout: 5000,
@@ -87,15 +61,20 @@ func main() {
 	}()
 
 	server.Run()
-	// f.Fetch(mem)
 }
 
 // TODO Next Steps
-// config options for hard coded values
 // stub out temperature states
-// Determine if the for select default in fetcher is best practice
-// Notify fetcher when more jobs get enqueued how?
-// Lease stuff for retries
+// Notify fetcher when more jobs get enqueued how (client is separate so ... not sure this is possible with this architecture unless)?
+
+// Lease/Retries
+// 1. Fetch and claim would updated leasedAt field, lease Expire time, retryAttempts field
+// 2. Worker needs to know about lease/lease expire time and I think stop the job and NAck if that timeout is met
+// 3. Commiter needs to update retryAttempts when it updates job
+// 4. Backoff by adding a retryAt, then that will exponentially grow after each retry
+// 5. Fetcher could then query for retryAt >= now
+// 6. Fetcher would need to determine a priority for pulling (could do a split of 80%/20% fresh/old work to keep most fresh work executing)
+// 7. See the docs/retry-requeue-strategy for queueing
 
 // Then next phase is tasks, how we are going to pass real tasks on the queue
 // How we wanna shape our Task Registry, etc..
