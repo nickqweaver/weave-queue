@@ -37,15 +37,21 @@ type Server struct {
 	// Close fn to shut everything down gracefully
 }
 
-type Config struct{}
+type Config struct {
+	BatchSize      int
+	MaxQueue       int
+	MaxConcurrency int
+	MaxRetries     int
+	MaxColdTimeout int
+}
 
-func NewServer(s store.Store) Server {
-	pending := make(chan Req, 1000)
-	finished := make(chan Res, 100)
+func NewServer(s store.Store, c Config) Server {
+	pending := make(chan Req, c.MaxQueue)
+	finished := make(chan Res, c.BatchSize)
 
-	consumer := NewConsumer(4, pending, finished)
+	consumer := NewConsumer(c.MaxConcurrency, pending, finished)
 	committer := NewCommitter(s, finished)
-	fetcher := NewFetcher(pending, 250, 3, 5000)
+	fetcher := NewFetcher(pending, c.BatchSize, c.MaxRetries, c.MaxColdTimeout)
 	server := Server{store: s, consumer: consumer, fetcher: fetcher, committer: committer}
 	fmt.Println("Created Server")
 

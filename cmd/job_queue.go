@@ -56,7 +56,13 @@ func main() {
 	//
 	// server.Run()
 
-	server := server.NewServer(mem)
+	server := server.NewServer(mem, server.Config{
+		MaxColdTimeout: 5000,
+		BatchSize:      100,
+		MaxQueue:       1000,
+		MaxConcurrency: 4,
+		MaxRetries:     3,
+	})
 	client := client.NewClient(mem)
 	for id := 1; id <= 10000; id++ {
 		if err := client.Enqueue("my_queue", strconv.Itoa(id)); err != nil {
@@ -85,14 +91,11 @@ func main() {
 }
 
 // TODO Next Steps
-// Cleanup Code/API DONE
-// Split modules up into their own files DONE
-// cleanup functions as struct methods
 // config options for hard coded values
 // stub out temperature states
 // Determine if the for select default in fetcher is best practice
-// Error handling, just do it now
 // Notify fetcher when more jobs get enqueued how?
+// Lease stuff for retries
 
 // Then next phase is tasks, how we are going to pass real tasks on the queue
 // How we wanna shape our Task Registry, etc..
