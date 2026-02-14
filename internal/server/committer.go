@@ -20,10 +20,14 @@ func NewCommitter(s store.Store, res chan Res) *Committer {
 
 func (c *Committer) batchWrite(batch []Res) {
 	for _, j := range batch {
+		var err error
 		if j.Status == Ack {
-			c.store.UpdateJob(j.ID, store.JobUpdate{Status: store.Succeeded})
+			err = c.store.UpdateJob(j.ID, store.JobUpdate{Status: store.Succeeded})
 		} else {
-			c.store.UpdateJob(j.ID, store.JobUpdate{Status: store.Failed})
+			err = c.store.UpdateJob(j.ID, store.JobUpdate{Status: store.Failed})
+		}
+		if err != nil {
+			fmt.Printf("Error updating job %s: %v\n", j.ID, err)
 		}
 	}
 }

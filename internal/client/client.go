@@ -13,6 +13,6 @@ func NewClient(s store.Store) *Client {
 	}
 }
 
-func (c *Client) Enqueue(queue string, id string) {
-	c.producer.Enqueue(queue, id)
+func (c *Client) Enqueue(queue string, id string) error {
+	return c.producer.Enqueue(queue, id)
 }

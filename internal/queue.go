@@ -43,10 +43,10 @@ type Producer struct {
 	store store.Store
 }
 
-func (p Producer) Enqueue(queue string, id string) {
+func (p Producer) Enqueue(queue string, id string) error {
 	// Create Job in Database with data
 	job := store.Job{ID: id, Status: store.Ready, Queue: queue}
-	p.store.AddJob(job)
+	return p.store.AddJob(job)
 }
 
 func NewProducer(store store.Store) *Producer {
@@ -161,10 +161,14 @@ func NewConsumer(s store.Store, concurrency int, req chan Req, res chan Res) Con
 
 	batchWrite := func(res []Res) {
 		for _, r := range res {
+			var err error
 			if r.Status == Ack {
-				s.UpdateJob(r.ID, store.JobUpdate{Status: store.Succeeded})
+				err = s.UpdateJob(r.ID, store.JobUpdate{Status: store.Succeeded})
 			} else {
-				s.UpdateJob(r.ID, store.JobUpdate{Status: store.Failed})
+				err = s.UpdateJob(r.ID, store.JobUpdate{Status: store.Failed})
+			}
+			if err != nil {
+				fmt.Printf("Error updating job %s: %v\n", r.ID, err)
 			}
 		}
 	}
@@ -332,8 +336,8 @@ type Client struct {
 }
 
 // This is the client
-func (c *Client) Enqueue(j int) {
-	c.producer.Enqueue("job_queue", strconv.Itoa(j))
+func (c *Client) Enqueue(j int) error {
+	return c.producer.Enqueue("job_queue", strconv.Itoa(j))
 }
 
 func NewClient(s store.Store) *Client {

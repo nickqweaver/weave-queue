@@ -44,7 +44,8 @@ func (f *Fetcher) fetch(ctx context.Context, s store.Store) {
 			return
 		default:
 		}
-		ready := s.FetchAndClaim(store.Ready, store.InFlight, 100)
+		ready := s.FetchAndClaim(store.Ready, store.InFlight, f.BatchSize)
+		fmt.Println("Fetching More Jobs...")
 
 		if len(ready) == 0 {
 			missed++
