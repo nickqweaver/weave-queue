@@ -1,6 +1,7 @@
 package memory
 
 import (
+	"fmt"
 	"sync"
 
 	"github.com/nickqweaver/weave-queue/internal/store"
@@ -54,22 +55,35 @@ func (n *MemoryStore) FetchAndClaim(curr store.Status, to store.Status, limit in
 	return filtered
 }
 
-func (n *MemoryStore) FailJob(id string) {}
+func (n *MemoryStore) FailJob(id string) error {
+	return nil
+}
 
-func (n *MemoryStore) AddJob(job store.Job) {
+func (n *MemoryStore) AddJob(job store.Job) error {
 	n.mu.Lock()
 	defer n.mu.Unlock()
 	n.jobs = append(n.jobs, job)
+	return nil
 }
 
-func (n *MemoryStore) UpdateJob(id string, update store.JobUpdate) {
+func (n *MemoryStore) UpdateJob(id string, update store.JobUpdate) error {
 	n.mu.Lock()
 	defer n.mu.Unlock()
 
 	for i := range n.jobs {
 		if n.jobs[i].ID == id {
 			n.jobs[i].Status = update.Status
-			return
+			return nil
 		}
 	}
+	return fmt.Errorf("job not found: %s", id)
+}
+
+func (n *MemoryStore) GetAllJobs() []store.Job {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+
+	result := make([]store.Job, len(n.jobs))
+	copy(result, n.jobs)
+	return result
 }

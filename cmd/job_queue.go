@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"log"
 	"strconv"
 	"time"
 
@@ -20,7 +21,9 @@ import (
 func addJobs(n int, p store.Store) {
 	for id := 1; id <= n; id++ {
 		job := store.Job{ID: strconv.Itoa(id), Status: store.Ready, Queue: "my-queue"}
-		p.AddJob(job)
+		if err := p.AddJob(job); err != nil {
+			log.Printf("Failed to add job %d: %v", id, err)
+		}
 	}
 }
 
@@ -55,10 +58,12 @@ func main() {
 
 	server := server.NewServer(mem)
 	client := client.NewClient(mem)
-	for id := 1; id <= 100_000; id++ {
-		client.Enqueue("my_queue", strconv.Itoa(id))
+	for id := 1; id <= 10000; id++ {
+		if err := client.Enqueue("my_queue", strconv.Itoa(id)); err != nil {
+			log.Printf("Failed to enqueue job %d: %v", id, err)
+		}
 	}
-	nextID := 100_001
+	nextID := 10001
 
 	go func() {
 		ticker := time.NewTicker(6 * time.Second)
@@ -66,8 +71,10 @@ func main() {
 
 		for tick := range ticker.C {
 			fmt.Println("More Jobs Incoming", tick)
-			for i := 0; i < 1_000; i++ {
-				client.Enqueue("my_queue", strconv.Itoa(nextID))
+			for i := 0; i < 10_000; i++ {
+				if err := client.Enqueue("my_queue", strconv.Itoa(nextID)); err != nil {
+					log.Printf("Failed to enqueue job %d: %v", nextID, err)
+				}
 				nextID++
 			}
 		}
@@ -78,13 +85,14 @@ func main() {
 }
 
 // TODO Next Steps
-// Cleanup Code/API
-// Split modules up into their own files
+// Cleanup Code/API DONE
+// Split modules up into their own files DONE
 // cleanup functions as struct methods
 // config options for hard coded values
 // stub out temperature states
 // Determine if the for select default in fetcher is best practice
 // Error handling, just do it now
+// Notify fetcher when more jobs get enqueued how?
 
 // Then next phase is tasks, how we are going to pass real tasks on the queue
 // How we wanna shape our Task Registry, etc..
