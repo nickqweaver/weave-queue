@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"strconv"
+	"time"
 
 	"github.com/nickqweaver/weave-queue/internal/store"
 )
@@ -23,10 +24,15 @@ func NewWorker(id int, req <-chan Req, res chan<- Res) *Worker {
 	}
 }
 
-func doWork(job store.Job) (bool, error) {
+func doWork(ctx context.Context, job store.Job) (bool, error) {
 	result := 0
 	for i := range 5_000 {
-		result += i * i
+		select {
+		case <-ctx.Done():
+			return false, ctx.Err()
+		default:
+			result += i * i
+		}
 	}
 	n, err := strconv.Atoi(job.ID)
 	if err != nil {
@@ -43,24 +49,39 @@ func doWork(job store.Job) (bool, error) {
 func (w *Worker) Run(ctx context.Context) {
 	for r := range w.req {
 		j := r.Job
-		// Handler placeholder, should return ok, err then we can ack/nack based on that
-		if _, err := doWork(j); err != nil {
+
+		if j.LeasedAt == nil {
 			response := Res{
 				Status:  NAck,
-				Message: err.Error(),
+				Message: "Job has not been leased",
 				ID:      j.ID,
 				From:    w.ID,
 			}
 
 			w.res <- response
 		} else {
-			response := Res{
-				Status:  Ack,
-				Message: fmt.Sprintf("Successfully completed Job %s", j.ID),
-				ID:      j.ID,
-				From:    w.ID,
+			deadline := j.LeasedAt.Add(time.Millisecond * time.Duration(j.Timeout))
+			// Handler placeholder, should return ok, err then we can ack/nack based on that
+			jobCtx, cancel := context.WithDeadline(ctx, deadline)
+			if _, err := doWork(jobCtx, j); err != nil {
+				response := Res{
+					Status:  NAck,
+					Message: err.Error(),
+					ID:      j.ID,
+					From:    w.ID,
+				}
+
+				w.res <- response
+			} else {
+				response := Res{
+					Status:  Ack,
+					Message: fmt.Sprintf("Successfully completed Job %s", j.ID),
+					ID:      j.ID,
+					From:    w.ID,
+				}
+				w.res <- response
 			}
-			w.res <- response
+			cancel()
 		}
 
 	}

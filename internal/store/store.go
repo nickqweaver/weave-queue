@@ -1,5 +1,7 @@
 package store
 
+import "time"
+
 type Status int
 
 const (
@@ -25,10 +27,13 @@ func (s Status) String() string {
 }
 
 type Job struct {
-	ID      string
-	Queue   string
-	Status  Status
-	Timeout int
+	ID       string
+	Queue    string
+	Status   Status
+	Timeout  int
+	LeasedAt *time.Time
+	RetryAt  *time.Time
+	Retries  int
 }
 
 type JobUpdate struct {

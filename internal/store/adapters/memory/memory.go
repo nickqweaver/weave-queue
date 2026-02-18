@@ -3,6 +3,7 @@ package memory
 import (
 	"fmt"
 	"sync"
+	"time"
 
 	"github.com/nickqweaver/weave-queue/internal/store"
 )
@@ -43,7 +44,9 @@ func (n *MemoryStore) FetchAndClaim(curr store.Status, to store.Status, limit in
 
 	for i, j := range n.jobs {
 		if j.Status == curr {
+			now := time.Now().UTC()
 			n.jobs[i].Status = to
+			n.jobs[i].LeasedAt = &now
 			filtered = append(filtered, n.jobs[i])
 			if len(filtered) == limit {
 				return filtered
