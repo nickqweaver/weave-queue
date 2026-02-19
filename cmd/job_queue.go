@@ -67,14 +67,5 @@ func main() {
 // stub out temperature states
 // Notify fetcher when more jobs get enqueued how (client is separate so ... not sure this is possible with this architecture unless)?
 
-// Lease/Retries
-// 1. Fetch and claim would updated leasedAt field, lease Expire time, retryAttempts field
-// 2. Worker needs to know about lease/lease expire time and I think stop the job and NAck if that timeout is met
-// 3. Commiter needs to update retryAttempts when it updates job
-// 4. Backoff by adding a retryAt, then that will exponentially grow after each retry
-// 5. Fetcher could then query for retryAt >= now
-// 6. Fetcher would need to determine a priority for pulling (could do a split of 80%/20% fresh/old work to keep most fresh work executing)
-// 7. See the docs/retry-requeue-strategy for queueing
-
 // Then next phase is tasks, how we are going to pass real tasks on the queue
 // How we wanna shape our Task Registry, etc..
