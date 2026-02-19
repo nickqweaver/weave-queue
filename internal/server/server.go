@@ -33,7 +33,10 @@ type Server struct {
 	fetcher   *Fetcher
 	consumer  *Consumer
 	committer *Committer
-	// Close fn to shut everything down gracefully
+
+	mu     sync.Mutex
+	cancel context.CancelFunc
+	done   chan struct{}
 }
 
 type Config struct {
@@ -60,6 +63,23 @@ func (s *Server) Run() {
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
+	s.mu.Lock()
+	if s.cancel != nil {
+		s.mu.Unlock()
+		return
+	}
+	s.done = make(chan struct{})
+	s.cancel = stop
+	done := s.done
+	s.mu.Unlock()
+
+	defer func() {
+		s.mu.Lock()
+		s.cancel = nil
+		s.mu.Unlock()
+		close(done)
+	}()
+
 	var wg sync.WaitGroup
 	wg.Add(3)
 
@@ -81,6 +101,22 @@ func (s *Server) Run() {
 	<-ctx.Done()
 	wg.Wait()
 	s.Cleanup()
+}
+
+func (s *Server) Close() {
+	s.mu.Lock()
+	cancel := s.cancel
+	done := s.done
+	s.mu.Unlock()
+
+	if done == nil {
+		return
+	}
+
+	if cancel != nil {
+		cancel()
+	}
+	<-done
 }
 
 func (s *Server) Cleanup() {
