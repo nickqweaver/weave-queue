@@ -6,7 +6,6 @@ import (
 	"os/signal"
 	"sync"
 	"syscall"
-	"time"
 
 	"github.com/nickqweaver/weave-queue/internal/store"
 )
@@ -53,13 +52,11 @@ func NewServer(s store.Store, c Config) Server {
 	committer := NewCommitter(s, finished)
 	fetcher := NewFetcher(pending, c.BatchSize, c.MaxRetries, c.MaxColdTimeout)
 	server := Server{store: s, consumer: consumer, fetcher: fetcher, committer: committer}
-	fmt.Println("Created Server")
 
 	return server
 }
 
 func (s *Server) Run() {
-	fmt.Println("Running Server...")
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
@@ -84,12 +81,10 @@ func (s *Server) Run() {
 	<-ctx.Done()
 	wg.Wait()
 	s.Cleanup()
-	fmt.Println("Goodbye")
 }
 
 func (s *Server) Cleanup() {
 	// cleanup will call all asset
 	fmt.Println()
-	fmt.Println("\nGracefully shutting down..")
-	time.Sleep(time.Second * 5)
+	fmt.Println("\nShutting down server..")
 }

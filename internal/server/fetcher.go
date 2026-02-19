@@ -27,10 +27,10 @@ func NewFetcher(pending chan Req, batchSize int, maxRetries int, maxColdTimeout 
 
 func (f *Fetcher) Cleanup() {
 	close(f.pending)
-	fmt.Println("Cleaning up Fetcher...")
-	time.Sleep(time.Second * 3)
 }
 
+// TODO:
+// Need to determine priority of how we are going to requeue failed jobs
 func (f *Fetcher) fetch(ctx context.Context, s store.Store) {
 	missed := 0
 	wait := 100
