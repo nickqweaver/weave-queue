@@ -38,12 +38,11 @@ func (f *Fetcher) fetch(ctx context.Context, s store.Store) {
 	defer f.Cleanup()
 
 	for {
-		select {
-		case <-ctx.Done():
+		if ctx.Err() != nil {
 			fmt.Println("Shutting Fetcher Down...")
 			return
-		default:
 		}
+
 		ready := s.FetchAndClaim(store.Ready, store.InFlight, f.BatchSize)
 		fmt.Println("Fetching More Jobs...")
 
@@ -52,7 +51,12 @@ func (f *Fetcher) fetch(ctx context.Context, s store.Store) {
 		} else {
 			// Send to pending Queue
 			for _, j := range ready {
-				f.pending <- Req{Job: j}
+				select {
+				case <-ctx.Done():
+					fmt.Println("Shutting Fetcher Down...")
+					return
+				case f.pending <- Req{Job: j}:
+				}
 			}
 			// Reset
 			missed = 0
@@ -62,7 +66,14 @@ func (f *Fetcher) fetch(ctx context.Context, s store.Store) {
 
 		if missed > 1 {
 			wait, timeout = utils.Backoff(wait, f.MaxColdTimeout, true)
-			time.Sleep(time.Millisecond * time.Duration(timeout))
+			t := time.NewTimer(time.Millisecond * timeout)
+			select {
+			case <-ctx.Done():
+				t.Stop()
+				fmt.Println("Shutting Fetcher Down...")
+				return
+			case <-t.C:
+			}
 		}
 
 	}
