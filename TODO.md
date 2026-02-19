@@ -76,3 +76,7 @@
 - `internal/server/committer.go`
 - `internal/server/*_test.go`
 - `internal/store/adapters/memory/memory_test.go`
+
+# Other
+
+1. Do we need to respawn crashed workers? Eg listen for failure and spawn a new one for redundancy
