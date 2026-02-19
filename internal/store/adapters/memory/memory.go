@@ -50,10 +50,11 @@ func (n *MemoryStore) FetchAndClaim(curr store.Status, to store.Status, limit in
 
 	now := time.Now().UTC()
 	claimed := make([]store.Job, 0, limit)
-	retryLimit := max(1, int(math.Floor(float64(limit)*retryFetchRatio)))
+	retryTarget := max(1, int(math.Floor(float64(limit)*retryFetchRatio)))
+	retryTarget = min(limit, retryTarget)
 
 	for i := range n.jobs {
-		if len(claimed) >= retryLimit {
+		if len(claimed) >= retryTarget {
 			break
 		}
 
@@ -83,6 +84,26 @@ func (n *MemoryStore) FetchAndClaim(curr store.Status, to store.Status, limit in
 
 		n.jobs[i].Status = to
 		n.jobs[i].LeasedAt = &now
+		claimed = append(claimed, n.jobs[i])
+	}
+
+	for i := range n.jobs {
+		if len(claimed) == limit {
+			break
+		}
+
+		job := n.jobs[i]
+		if job.Status != store.Failed {
+			continue
+		}
+
+		if job.RetryAt == nil || job.RetryAt.After(now) {
+			continue
+		}
+
+		n.jobs[i].Status = to
+		n.jobs[i].LeasedAt = &now
+		n.jobs[i].RetryAt = nil
 		claimed = append(claimed, n.jobs[i])
 	}
 

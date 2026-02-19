@@ -104,6 +104,89 @@ func TestFetchAndClaim_SmallBatchClaimsAtLeastOneRetry(t *testing.T) {
 	}
 }
 
+func TestFetchAndClaim_FillsBatchFromDueRetriesWhenNoFreshJobs(t *testing.T) {
+	m := NewMemoryStore()
+	now := time.Now().UTC()
+	past := now.Add(-time.Minute)
+
+	for i := range 20 {
+		addJobs(t, m, store.Job{
+			ID:      fmt.Sprintf("retry-%d", i+1),
+			Status:  store.Failed,
+			RetryAt: &past,
+		})
+	}
+
+	claimed := m.FetchAndClaim(store.Ready, store.InFlight, 10)
+	if got := len(claimed); got != 10 {
+		t.Fatalf("expected 10 claimed jobs, got %d", got)
+	}
+
+	for _, job := range claimed {
+		if !strings.HasPrefix(job.ID, "retry-") {
+			t.Fatalf("expected only retry jobs, got %s", job.ID)
+		}
+		if job.Status != store.InFlight {
+			t.Fatalf("expected claimed status %s, got %s", store.InFlight, job.Status)
+		}
+		if job.LeasedAt == nil {
+			t.Fatalf("expected claimed job %s to have a lease timestamp", job.ID)
+		}
+		if job.RetryAt != nil {
+			t.Fatalf("expected claimed retry job %s retryAt to be cleared", job.ID)
+		}
+	}
+}
+
+func TestFetchAndClaim_BackfillsWithDueRetriesWhenFreshInsufficient(t *testing.T) {
+	m := NewMemoryStore()
+	now := time.Now().UTC()
+	past := now.Add(-time.Minute)
+	future := now.Add(time.Minute)
+
+	addJobs(t, m,
+		store.Job{ID: "retry-due-1", Status: store.Failed, RetryAt: &past},
+		store.Job{ID: "retry-due-2", Status: store.Failed, RetryAt: &past},
+		store.Job{ID: "retry-due-3", Status: store.Failed, RetryAt: &past},
+		store.Job{ID: "retry-due-4", Status: store.Failed, RetryAt: &past},
+		store.Job{ID: "retry-due-5", Status: store.Failed, RetryAt: &past},
+		store.Job{ID: "retry-future", Status: store.Failed, RetryAt: &future},
+		store.Job{ID: "retry-nil", Status: store.Failed},
+		store.Job{ID: "ready-1", Status: store.Ready},
+		store.Job{ID: "ready-2", Status: store.Ready},
+	)
+
+	claimed := m.FetchAndClaim(store.Ready, store.InFlight, 6)
+	if got := len(claimed); got != 6 {
+		t.Fatalf("expected 6 claimed jobs, got %d", got)
+	}
+
+	retryCount := 0
+	readyCount := 0
+	claimedIDs := byID(claimed)
+	for _, job := range claimed {
+		if strings.HasPrefix(job.ID, "retry-") {
+			retryCount++
+		}
+		if strings.HasPrefix(job.ID, "ready-") {
+			readyCount++
+		}
+	}
+
+	if retryCount != 4 {
+		t.Fatalf("expected 4 retry jobs after backfill, got %d", retryCount)
+	}
+	if readyCount != 2 {
+		t.Fatalf("expected 2 fresh jobs, got %d", readyCount)
+	}
+	if _, ok := claimedIDs["retry-future"]; ok {
+		t.Fatalf("did not expect future retry job to be claimed")
+	}
+	if _, ok := claimedIDs["retry-nil"]; ok {
+		t.Fatalf("did not expect nil retryAt job to be claimed")
+	}
+}
+
 func TestFetchAndClaim_OnlyClaimsDueRetries(t *testing.T) {
 	m := NewMemoryStore()
 	now := time.Now().UTC()
