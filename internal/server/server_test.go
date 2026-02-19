@@ -2,6 +2,7 @@ package server
 
 import (
 	"testing"
+	"time"
 
 	"github.com/nickqweaver/weave-queue/internal/store"
 	memory "github.com/nickqweaver/weave-queue/internal/store/adapters/memory"
@@ -69,4 +70,63 @@ func TestNewServer_WiresComponentsAndChannelCapacities(t *testing.T) {
 	if res.Status != Ack {
 		t.Fatalf("expected res status %v, got %v", Ack, res.Status)
 	}
+}
+
+func TestServerClose_ShutsDownRunAndIsIdempotent(t *testing.T) {
+	mem := memory.NewMemoryStore()
+	cfg := Config{
+		BatchSize:      4,
+		MaxQueue:       8,
+		MaxConcurrency: 2,
+		MaxRetries:     3,
+		MaxColdTimeout: 500,
+	}
+
+	s := NewServer(mem, cfg)
+
+	runDone := make(chan struct{})
+	go func() {
+		s.Run()
+		close(runDone)
+	}()
+
+	waitForServerStart(t, &s, time.Second)
+	s.Close()
+
+	select {
+	case <-runDone:
+	case <-time.After(2 * time.Second):
+		t.Fatal("server did not stop after Close")
+	}
+
+	closeDone := make(chan struct{})
+	go func() {
+		s.Close()
+		close(closeDone)
+	}()
+
+	select {
+	case <-closeDone:
+	case <-time.After(250 * time.Millisecond):
+		t.Fatal("expected second Close call to return immediately")
+	}
+}
+
+func waitForServerStart(t *testing.T, s *Server, timeout time.Duration) {
+	t.Helper()
+
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		s.mu.Lock()
+		running := s.cancel != nil
+		s.mu.Unlock()
+
+		if running {
+			return
+		}
+
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	t.Fatal("server never started")
 }
