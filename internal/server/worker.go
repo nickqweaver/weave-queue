@@ -55,6 +55,7 @@ func (w *Worker) Run(ctx context.Context) {
 				Status:  NAck,
 				Message: "Job has not been leased",
 				ID:      j.ID,
+				Job:     j,
 				From:    w.ID,
 			}
 
@@ -68,6 +69,7 @@ func (w *Worker) Run(ctx context.Context) {
 					Status:  NAck,
 					Message: err.Error(),
 					ID:      j.ID,
+					Job:     j,
 					From:    w.ID,
 				}
 
@@ -77,6 +79,7 @@ func (w *Worker) Run(ctx context.Context) {
 					Status:  Ack,
 					Message: fmt.Sprintf("Successfully completed Job %s", j.ID),
 					ID:      j.ID,
+					Job:     j,
 					From:    w.ID,
 				}
 				w.res <- response

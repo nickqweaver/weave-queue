@@ -39,6 +39,7 @@ type Job struct {
 type JobUpdate struct {
 	Status  Status
 	Retries *int
+	RetryAt *time.Time
 }
 
 type Store interface {

@@ -2,34 +2,77 @@ package server
 
 import (
 	"fmt"
+	"time"
 
 	"github.com/nickqweaver/weave-queue/internal/store"
+	"github.com/nickqweaver/weave-queue/internal/utils"
+)
+
+const (
+	retryBackoffBaseMS = 500
+	retryBackoffMaxMS  = 30_000
 )
 
 type Committer struct {
-	store store.Store
-	res   <-chan Res
+	store      store.Store
+	res        <-chan Res
+	maxRetries int
 }
 
-func NewCommitter(s store.Store, res chan Res) *Committer {
+func NewCommitter(s store.Store, res chan Res, maxRetries int) *Committer {
 	return &Committer{
-		store: s,
-		res:   res,
+		store:      s,
+		res:        res,
+		maxRetries: max(0, maxRetries),
 	}
 }
 
 func (c *Committer) batchWrite(batch []Res) {
-	for _, j := range batch {
-		var err error
-		if j.Status == Ack {
-			err = c.store.UpdateJob(j.ID, store.JobUpdate{Status: store.Succeeded})
-		} else {
-			err = c.store.UpdateJob(j.ID, store.JobUpdate{Status: store.Failed})
+	for _, r := range batch {
+		jobID := r.ID
+		if r.Job.ID != "" {
+			jobID = r.Job.ID
 		}
+
+		if jobID == "" {
+			fmt.Printf("Error updating job: missing job id in response %+v\n", r)
+			continue
+		}
+
+		update := store.JobUpdate{Status: store.Succeeded}
+
+		if r.Status != Ack {
+			nextRetries := r.Job.Retries + 1
+
+			if nextRetries <= c.maxRetries {
+				retryAt := time.Now().UTC().Add(retryDelay(nextRetries))
+				update = store.JobUpdate{
+					Status:  store.Failed,
+					Retries: &nextRetries,
+					RetryAt: &retryAt,
+				}
+			} else {
+				update = store.JobUpdate{Status: store.Failed}
+			}
+		}
+
+		var err error
+		err = c.store.UpdateJob(jobID, update)
 		if err != nil {
-			fmt.Printf("Error updating job %s: %v\n", j.ID, err)
+			fmt.Printf("Error updating job %s: %v\n", jobID, err)
 		}
 	}
+}
+
+func retryDelay(attempt int) time.Duration {
+	timeout := retryBackoffBaseMS
+	delay := time.Duration(timeout)
+
+	for range max(1, attempt) {
+		timeout, delay = utils.Backoff(timeout, retryBackoffMaxMS, false)
+	}
+
+	return time.Millisecond * delay
 }
 
 func (c *Committer) run() {

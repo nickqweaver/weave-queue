@@ -20,6 +20,7 @@ const (
 type Res struct {
 	Status  Status
 	ID      string
+	Job     store.Job
 	Message string
 	From    int
 }
@@ -52,7 +53,7 @@ func NewServer(s store.Store, c Config) Server {
 	finished := make(chan Res, c.BatchSize)
 
 	consumer := NewConsumer(c.MaxConcurrency, pending, finished)
-	committer := NewCommitter(s, finished)
+	committer := NewCommitter(s, finished, c.MaxRetries)
 	fetcher := NewFetcher(pending, c.BatchSize, c.MaxRetries, c.MaxColdTimeout)
 	server := Server{store: s, consumer: consumer, fetcher: fetcher, committer: committer}
 

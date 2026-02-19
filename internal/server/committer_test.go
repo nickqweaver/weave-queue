@@ -5,44 +5,58 @@ import (
 	"fmt"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/nickqweaver/weave-queue/internal/store"
 )
 
 func TestCommitterBatchWrite_MapsAckAndNackStatuses(t *testing.T) {
 	s := newCommitterStoreStub("job-1", "job-2")
-	c := NewCommitter(s, make(chan Res, 1))
+	c := NewCommitter(s, make(chan Res, 1), 3)
+	before := time.Now().UTC()
 
 	c.batchWrite([]Res{
-		{ID: "job-1", Status: Ack},
-		{ID: "job-2", Status: NAck},
+		{ID: "job-1", Status: Ack, Job: store.Job{ID: "job-1", Retries: 0}},
+		{ID: "job-2", Status: NAck, Job: store.Job{ID: "job-2", Retries: 0}},
 	})
 
-	status, ok := s.status("job-1")
+	job, ok := s.job("job-1")
 	if !ok {
 		t.Fatalf("job-1 not found in store")
 	}
-	if status != store.Succeeded {
-		t.Fatalf("expected job-1 status %s, got %s", store.Succeeded, status)
+	if job.Status != store.Succeeded {
+		t.Fatalf("expected job-1 status %s, got %s", store.Succeeded, job.Status)
+	}
+	if job.RetryAt != nil {
+		t.Fatalf("expected job-1 retryAt to be nil after ack")
 	}
 
-	status, ok = s.status("job-2")
+	job, ok = s.job("job-2")
 	if !ok {
 		t.Fatalf("job-2 not found in store")
 	}
-	if status != store.Failed {
-		t.Fatalf("expected job-2 status %s, got %s", store.Failed, status)
+	if job.Status != store.Failed {
+		t.Fatalf("expected job-2 status %s, got %s", store.Failed, job.Status)
+	}
+	if job.Retries != 1 {
+		t.Fatalf("expected job-2 retries to increment to 1, got %d", job.Retries)
+	}
+	if job.RetryAt == nil {
+		t.Fatalf("expected job-2 retryAt to be scheduled")
+	}
+	if !job.RetryAt.After(before) {
+		t.Fatalf("expected job-2 retryAt %v to be after %v", job.RetryAt, before)
 	}
 }
 
 func TestCommitterRun_FlushesFinalPartialBatchOnClose(t *testing.T) {
 	s := newCommitterStoreStub("1", "2", "3")
 	res := make(chan Res, 4)
-	c := NewCommitter(s, res)
+	c := NewCommitter(s, res, 3)
 
-	res <- Res{ID: "1", Status: Ack}
-	res <- Res{ID: "2", Status: Ack}
-	res <- Res{ID: "3", Status: NAck}
+	res <- Res{ID: "1", Status: Ack, Job: store.Job{ID: "1", Retries: 0}}
+	res <- Res{ID: "2", Status: Ack, Job: store.Job{ID: "2", Retries: 0}}
+	res <- Res{ID: "3", Status: NAck, Job: store.Job{ID: "3", Retries: 1}}
 	close(res)
 
 	c.run()
@@ -51,61 +65,99 @@ func TestCommitterRun_FlushesFinalPartialBatchOnClose(t *testing.T) {
 		t.Fatalf("expected 3 update calls, got %d", s.updateCount())
 	}
 
-	status, _ := s.status("1")
-	if status != store.Succeeded {
-		t.Fatalf("expected job 1 status %s, got %s", store.Succeeded, status)
+	job, _ := s.job("1")
+	if job.Status != store.Succeeded {
+		t.Fatalf("expected job 1 status %s, got %s", store.Succeeded, job.Status)
 	}
-	status, _ = s.status("2")
-	if status != store.Succeeded {
-		t.Fatalf("expected job 2 status %s, got %s", store.Succeeded, status)
+	job, _ = s.job("2")
+	if job.Status != store.Succeeded {
+		t.Fatalf("expected job 2 status %s, got %s", store.Succeeded, job.Status)
 	}
-	status, _ = s.status("3")
-	if status != store.Failed {
-		t.Fatalf("expected job 3 status %s, got %s", store.Failed, status)
+	job, _ = s.job("3")
+	if job.Status != store.Failed {
+		t.Fatalf("expected job 3 status %s, got %s", store.Failed, job.Status)
+	}
+	if job.Retries != 2 {
+		t.Fatalf("expected job 3 retries to increment to 2, got %d", job.Retries)
+	}
+	if job.RetryAt == nil {
+		t.Fatalf("expected job 3 retryAt to be scheduled")
 	}
 }
 
 func TestCommitterBatchWrite_ContinuesAfterUpdateError(t *testing.T) {
 	s := newCommitterStoreStub("1", "3")
 	s.setFailure("2", errors.New("forced update error"))
-	c := NewCommitter(s, make(chan Res, 1))
+	c := NewCommitter(s, make(chan Res, 1), 3)
 
 	c.batchWrite([]Res{
-		{ID: "1", Status: Ack},
-		{ID: "2", Status: Ack},
-		{ID: "3", Status: NAck},
+		{ID: "1", Status: Ack, Job: store.Job{ID: "1", Retries: 0}},
+		{ID: "2", Status: Ack, Job: store.Job{ID: "2", Retries: 0}},
+		{ID: "3", Status: NAck, Job: store.Job{ID: "3", Retries: 0}},
 	})
 
 	if s.updateCount() != 3 {
 		t.Fatalf("expected 3 update calls, got %d", s.updateCount())
 	}
 
-	status, _ := s.status("1")
-	if status != store.Succeeded {
-		t.Fatalf("expected job 1 status %s, got %s", store.Succeeded, status)
+	job, _ := s.job("1")
+	if job.Status != store.Succeeded {
+		t.Fatalf("expected job 1 status %s, got %s", store.Succeeded, job.Status)
 	}
-	status, _ = s.status("3")
-	if status != store.Failed {
-		t.Fatalf("expected job 3 status %s, got %s", store.Failed, status)
+	job, _ = s.job("3")
+	if job.Status != store.Failed {
+		t.Fatalf("expected job 3 status %s, got %s", store.Failed, job.Status)
+	}
+	if job.Retries != 1 {
+		t.Fatalf("expected job 3 retries to increment to 1, got %d", job.Retries)
+	}
+}
+
+func TestCommitterBatchWrite_StopsRetryingAtMaxRetries(t *testing.T) {
+	const maxRetries = 3
+
+	s := newCommitterStoreStub("job-1")
+	seed := store.Job{ID: "job-1", Status: store.InFlight, Retries: maxRetries}
+	if err := s.AddJob(seed); err != nil {
+		t.Fatalf("failed seeding job: %v", err)
+	}
+
+	c := NewCommitter(s, make(chan Res, 1), maxRetries)
+	c.batchWrite([]Res{
+		{ID: "job-1", Status: NAck, Job: seed},
+	})
+
+	job, ok := s.job("job-1")
+	if !ok {
+		t.Fatalf("job-1 not found in store")
+	}
+	if job.Status != store.Failed {
+		t.Fatalf("expected terminal status %s, got %s", store.Failed, job.Status)
+	}
+	if job.Retries != maxRetries {
+		t.Fatalf("expected retries to remain %d, got %d", maxRetries, job.Retries)
+	}
+	if job.RetryAt != nil {
+		t.Fatalf("expected retryAt to be nil once max retries is exceeded")
 	}
 }
 
 type committerStoreStub struct {
-	mu       sync.Mutex
-	statuses map[string]store.Status
-	failIDs  map[string]error
-	updates  int
+	mu      sync.Mutex
+	jobs    map[string]store.Job
+	failIDs map[string]error
+	updates int
 }
 
 func newCommitterStoreStub(ids ...string) *committerStoreStub {
-	statuses := make(map[string]store.Status, len(ids))
+	jobs := make(map[string]store.Job, len(ids))
 	for _, id := range ids {
-		statuses[id] = store.Ready
+		jobs[id] = store.Job{ID: id, Status: store.Ready}
 	}
 
 	return &committerStoreStub{
-		statuses: statuses,
-		failIDs:  make(map[string]error),
+		jobs:    jobs,
+		failIDs: make(map[string]error),
 	}
 }
 
@@ -115,11 +167,11 @@ func (s *committerStoreStub) setFailure(id string, err error) {
 	s.failIDs[id] = err
 }
 
-func (s *committerStoreStub) status(id string) (store.Status, bool) {
+func (s *committerStoreStub) job(id string) (store.Job, bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	status, ok := s.statuses[id]
-	return status, ok
+	job, ok := s.jobs[id]
+	return job, ok
 }
 
 func (s *committerStoreStub) updateCount() int {
@@ -143,7 +195,7 @@ func (s *committerStoreStub) FailJob(id string) error {
 func (s *committerStoreStub) AddJob(job store.Job) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.statuses[job.ID] = job.Status
+	s.jobs[job.ID] = job
 	return nil
 }
 
@@ -156,11 +208,17 @@ func (s *committerStoreStub) UpdateJob(id string, update store.JobUpdate) error 
 		return err
 	}
 
-	if _, ok := s.statuses[id]; !ok {
+	job, ok := s.jobs[id]
+	if !ok {
 		return fmt.Errorf("job not found: %s", id)
 	}
 
-	s.statuses[id] = update.Status
+	job.Status = update.Status
+	if update.Retries != nil {
+		job.Retries = *update.Retries
+	}
+	job.RetryAt = update.RetryAt
+	s.jobs[id] = job
 	return nil
 }
 

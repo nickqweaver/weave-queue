@@ -137,7 +137,7 @@ func TestWorkerAndCommitter_TenJobs_OneTimeoutMarksFailed(t *testing.T) {
 	req := make(chan Req, totalJobs)
 	res := make(chan Res, totalJobs)
 	w := NewWorker(1, req, res)
-	committer := NewCommitter(mem, res)
+	committer := NewCommitter(mem, res, 3)
 
 	jobs, timedOutID := jobsWithOneExpiredLease(totalJobs, 6)
 	for _, job := range jobs {
@@ -148,6 +148,7 @@ func TestWorkerAndCommitter_TenJobs_OneTimeoutMarksFailed(t *testing.T) {
 	}
 	close(req)
 
+	beforeCommit := time.Now().UTC()
 	w.Run(context.Background())
 	close(res)
 	committer.run()
@@ -159,7 +160,7 @@ func TestWorkerAndCommitter_TenJobs_OneTimeoutMarksFailed(t *testing.T) {
 
 	succeeded := 0
 	failed := 0
-	timedOutStatus := store.Ready
+	timedOutJob := store.Job{}
 	foundTimedOut := false
 
 	for _, job := range allJobs {
@@ -171,7 +172,7 @@ func TestWorkerAndCommitter_TenJobs_OneTimeoutMarksFailed(t *testing.T) {
 		}
 
 		if job.ID == timedOutID {
-			timedOutStatus = job.Status
+			timedOutJob = job
 			foundTimedOut = true
 		}
 	}
@@ -185,8 +186,17 @@ func TestWorkerAndCommitter_TenJobs_OneTimeoutMarksFailed(t *testing.T) {
 	if !foundTimedOut {
 		t.Fatalf("timed out job %s not found in store", timedOutID)
 	}
-	if timedOutStatus != store.Failed {
-		t.Fatalf("expected timed out job %s to be failed, got %s", timedOutID, timedOutStatus)
+	if timedOutJob.Status != store.Failed {
+		t.Fatalf("expected timed out job %s to be failed, got %s", timedOutID, timedOutJob.Status)
+	}
+	if timedOutJob.Retries != 1 {
+		t.Fatalf("expected timed out job %s retries to be 1, got %d", timedOutID, timedOutJob.Retries)
+	}
+	if timedOutJob.RetryAt == nil {
+		t.Fatalf("expected timed out job %s retryAt to be scheduled", timedOutID)
+	}
+	if !timedOutJob.RetryAt.After(beforeCommit) {
+		t.Fatalf("expected timed out job %s retryAt %v to be after %v", timedOutID, timedOutJob.RetryAt, beforeCommit)
 	}
 }
 
