@@ -10,20 +10,26 @@ import (
 )
 
 type Fetcher struct {
-	BatchSize       int
-	MaxRetries      int
-	MaxColdTimeout  int
-	LeaseDurationMS int
-	pending         chan Req
+	BatchSize          int
+	MaxRetries         int
+	MaxColdTimeout     int
+	LeaseDurationMS    int
+	RetryFetchRatio    float64
+	RetryBackoffBaseMS int
+	RetryBackoffMaxMS  int
+	pending            chan Req
 }
 
-func NewFetcher(pending chan Req, batchSize int, maxRetries int, maxColdTimeout int, leaseDurationMS int) *Fetcher {
+func NewFetcher(pending chan Req, batchSize int, maxRetries int, maxColdTimeout int, leaseDurationMS int, retryFetchRatio float64, retryBackoffBaseMS int, retryBackoffMaxMS int) *Fetcher {
 	return &Fetcher{
-		BatchSize:       batchSize,
-		MaxColdTimeout:  maxColdTimeout,
-		MaxRetries:      maxRetries,
-		LeaseDurationMS: leaseDurationMS,
-		pending:         pending,
+		BatchSize:          batchSize,
+		MaxColdTimeout:     maxColdTimeout,
+		MaxRetries:         maxRetries,
+		LeaseDurationMS:    leaseDurationMS,
+		RetryFetchRatio:    retryFetchRatio,
+		RetryBackoffBaseMS: retryBackoffBaseMS,
+		RetryBackoffMaxMS:  retryBackoffMaxMS,
+		pending:            pending,
 	}
 }
 
@@ -45,7 +51,14 @@ func (f *Fetcher) fetch(ctx context.Context, s store.Store) {
 			return
 		}
 
-		ready := s.FetchAndClaim(store.Ready, store.InFlight, f.BatchSize, f.LeaseDurationMS)
+		ready := s.ClaimAvailable(store.ClaimOptions{
+			Limit:              f.BatchSize,
+			LeaseDurationMS:    f.LeaseDurationMS,
+			RetryFetchRatio:    f.RetryFetchRatio,
+			MaxRetries:         f.MaxRetries,
+			RetryBackoffBaseMS: f.RetryBackoffBaseMS,
+			RetryBackoffMaxMS:  f.RetryBackoffMaxMS,
+		})
 		fmt.Println("Fetching More Jobs...")
 
 		if len(ready) == 0 {

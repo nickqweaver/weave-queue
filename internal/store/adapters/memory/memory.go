@@ -7,9 +7,8 @@ import (
 	"time"
 
 	"github.com/nickqweaver/weave-queue/internal/store"
+	"github.com/nickqweaver/weave-queue/internal/utils"
 )
-
-const retryFetchRatio = 0.20
 
 type MemoryStore struct {
 	mu   sync.Mutex
@@ -40,19 +39,32 @@ func (n *MemoryStore) FetchJobs(status store.Status, limit int) []store.Job {
 	return filtered
 }
 
-func (n *MemoryStore) FetchAndClaim(curr store.Status, to store.Status, limit int, leaseDurationMS int) []store.Job {
+func (n *MemoryStore) ClaimAvailable(opts store.ClaimOptions) []store.Job {
 	n.mu.Lock()
 	defer n.mu.Unlock()
 
-	if limit <= 0 {
+	if opts.Limit <= 0 {
 		return nil
 	}
 
+	maxRetries := max(0, opts.MaxRetries)
+	retryFetchRatio := opts.RetryFetchRatio
+	if retryFetchRatio < 0 {
+		retryFetchRatio = 0
+	}
+	if retryFetchRatio > 1 {
+		retryFetchRatio = 1
+	}
 	now := time.Now().UTC()
-	leaseExpiresAt := now.Add(time.Millisecond * time.Duration(max(0, leaseDurationMS)))
-	claimed := make([]store.Job, 0, limit)
-	retryTarget := max(1, int(math.Floor(float64(limit)*retryFetchRatio)))
-	retryTarget = min(limit, retryTarget)
+	n.recoverExpiredLeasesLocked(now, maxRetries, opts.RetryBackoffBaseMS, opts.RetryBackoffMaxMS)
+
+	leaseExpiresAt := now.Add(time.Millisecond * time.Duration(max(0, opts.LeaseDurationMS)))
+	claimed := make([]store.Job, 0, opts.Limit)
+	retryTarget := int(math.Floor(float64(opts.Limit) * retryFetchRatio))
+	if retryFetchRatio > 0 && retryTarget == 0 {
+		retryTarget = 1
+	}
+	retryTarget = min(opts.Limit, retryTarget)
 
 	for i := range n.jobs {
 		if len(claimed) >= retryTarget {
@@ -60,49 +72,41 @@ func (n *MemoryStore) FetchAndClaim(curr store.Status, to store.Status, limit in
 		}
 
 		job := n.jobs[i]
-		if job.Status != store.Failed {
+		if !isDueRetry(job, now) {
 			continue
 		}
 
-		if job.RetryAt == nil || job.RetryAt.After(now) {
-			continue
-		}
-
-		n.jobs[i].Status = to
+		n.jobs[i].Status = store.InFlight
 		n.jobs[i].LeaseExpiresAt = &leaseExpiresAt
 		n.jobs[i].RetryAt = nil
 		claimed = append(claimed, n.jobs[i])
 	}
 
 	for i := range n.jobs {
-		if len(claimed) == limit {
+		if len(claimed) == opts.Limit {
 			break
 		}
 
-		if n.jobs[i].Status != curr {
+		if n.jobs[i].Status != store.Ready {
 			continue
 		}
 
-		n.jobs[i].Status = to
+		n.jobs[i].Status = store.InFlight
 		n.jobs[i].LeaseExpiresAt = &leaseExpiresAt
 		claimed = append(claimed, n.jobs[i])
 	}
 
 	for i := range n.jobs {
-		if len(claimed) == limit {
+		if len(claimed) == opts.Limit {
 			break
 		}
 
 		job := n.jobs[i]
-		if job.Status != store.Failed {
+		if !isDueRetry(job, now) {
 			continue
 		}
 
-		if job.RetryAt == nil || job.RetryAt.After(now) {
-			continue
-		}
-
-		n.jobs[i].Status = to
+		n.jobs[i].Status = store.InFlight
 		n.jobs[i].LeaseExpiresAt = &leaseExpiresAt
 		n.jobs[i].RetryAt = nil
 		claimed = append(claimed, n.jobs[i])
@@ -148,21 +152,8 @@ func (n *MemoryStore) GetAllJobs() []store.Job {
 	return result
 }
 
-func (n *MemoryStore) RecoverExpiredLeases(now time.Time, limit int) []store.Job {
-	n.mu.Lock()
-	defer n.mu.Unlock()
-
-	if limit <= 0 {
-		return nil
-	}
-
-	res := make([]store.Job, 0, limit)
-
+func (n *MemoryStore) recoverExpiredLeasesLocked(now time.Time, maxRetries int, retryBackoffBaseMS int, retryBackoffMaxMS int) {
 	for i := range n.jobs {
-		if len(res) >= limit {
-			break
-		}
-
 		if n.jobs[i].Status != store.InFlight {
 			continue
 		}
@@ -171,8 +162,30 @@ func (n *MemoryStore) RecoverExpiredLeases(now time.Time, limit int) []store.Job
 			continue
 		}
 
-		res = append(res, n.jobs[i])
+		n.jobs[i].LeaseExpiresAt = nil
+
+		nextRetries := n.jobs[i].Retries + 1
+		n.jobs[i].Retries = nextRetries
+		n.jobs[i].Status = store.Failed
+
+		if nextRetries <= maxRetries {
+			retryAt := now.Add(utils.RetryDelay(nextRetries, retryBackoffBaseMS, retryBackoffMaxMS))
+			n.jobs[i].RetryAt = &retryAt
+			continue
+		}
+
+		n.jobs[i].RetryAt = nil
+	}
+}
+
+func isDueRetry(job store.Job, now time.Time) bool {
+	if job.Status != store.Failed {
+		return false
 	}
 
-	return res
+	if job.RetryAt == nil {
+		return false
+	}
+
+	return !job.RetryAt.After(now)
 }

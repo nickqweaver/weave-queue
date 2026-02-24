@@ -137,7 +137,7 @@ func TestWorkerAndCommitter_TenJobs_OneTimeoutMarksFailed(t *testing.T) {
 	req := make(chan Req, totalJobs)
 	res := make(chan Res, totalJobs)
 	w := NewWorker(1, req, res)
-	committer := NewCommitter(mem, res, 3)
+	committer := NewCommitter(mem, res, 3, 500, 30_000)
 
 	jobs, timedOutID := jobsWithOneExpiredLease(totalJobs, 6)
 	for _, job := range jobs {

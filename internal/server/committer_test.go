@@ -12,7 +12,7 @@ import (
 
 func TestCommitterBatchWrite_MapsAckAndNackStatuses(t *testing.T) {
 	s := newCommitterStoreStub("job-1", "job-2")
-	c := NewCommitter(s, make(chan Res, 1), 3)
+	c := NewCommitter(s, make(chan Res, 1), 3, 500, 30_000)
 	before := time.Now().UTC()
 
 	c.batchWrite([]Res{
@@ -52,7 +52,7 @@ func TestCommitterBatchWrite_MapsAckAndNackStatuses(t *testing.T) {
 func TestCommitterRun_FlushesFinalPartialBatchOnClose(t *testing.T) {
 	s := newCommitterStoreStub("1", "2", "3")
 	res := make(chan Res, 4)
-	c := NewCommitter(s, res, 3)
+	c := NewCommitter(s, res, 3, 500, 30_000)
 
 	res <- Res{ID: "1", Status: Ack, Job: store.Job{ID: "1", Retries: 0}}
 	res <- Res{ID: "2", Status: Ack, Job: store.Job{ID: "2", Retries: 0}}
@@ -88,7 +88,7 @@ func TestCommitterRun_FlushesFinalPartialBatchOnClose(t *testing.T) {
 func TestCommitterBatchWrite_ContinuesAfterUpdateError(t *testing.T) {
 	s := newCommitterStoreStub("1", "3")
 	s.setFailure("2", errors.New("forced update error"))
-	c := NewCommitter(s, make(chan Res, 1), 3)
+	c := NewCommitter(s, make(chan Res, 1), 3, 500, 30_000)
 
 	c.batchWrite([]Res{
 		{ID: "1", Status: Ack, Job: store.Job{ID: "1", Retries: 0}},
@@ -122,7 +122,7 @@ func TestCommitterBatchWrite_StopsRetryingAtMaxRetries(t *testing.T) {
 		t.Fatalf("failed seeding job: %v", err)
 	}
 
-	c := NewCommitter(s, make(chan Res, 1), maxRetries)
+	c := NewCommitter(s, make(chan Res, 1), maxRetries, 500, 30_000)
 	c.batchWrite([]Res{
 		{ID: "job-1", Status: NAck, Job: seed},
 	})
@@ -184,7 +184,7 @@ func (s *committerStoreStub) FetchJobs(status store.Status, limit int) []store.J
 	return nil
 }
 
-func (s *committerStoreStub) FetchAndClaim(curr store.Status, to store.Status, limit int, leaseDurationMS int) []store.Job {
+func (s *committerStoreStub) ClaimAvailable(opts store.ClaimOptions) []store.Job {
 	return nil
 }
 
@@ -223,9 +223,5 @@ func (s *committerStoreStub) UpdateJob(id string, update store.JobUpdate) error 
 }
 
 func (s *committerStoreStub) GetAllJobs() []store.Job {
-	return nil
-}
-
-func (s *committerStoreStub) RecoverExpiredLeases(now time.Time, limit int) []store.Job {
 	return nil
 }

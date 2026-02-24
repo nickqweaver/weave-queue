@@ -42,12 +42,20 @@ type JobUpdate struct {
 	RetryAt *time.Time
 }
 
+type ClaimOptions struct {
+	Limit              int
+	LeaseDurationMS    int
+	RetryFetchRatio    float64
+	MaxRetries         int
+	RetryBackoffBaseMS int
+	RetryBackoffMaxMS  int
+}
+
 type Store interface {
 	FetchJobs(status Status, limit int) []Job
-	FetchAndClaim(curr Status, to Status, limit int, leaseDurationMS int) []Job
+	ClaimAvailable(opts ClaimOptions) []Job
 	FailJob(id string) error
 	AddJob(job Job) error
 	UpdateJob(id string, update JobUpdate) error
 	GetAllJobs() []Job
-	RecoverExpiredLeases(now time.Time, limit int) []Job
 }

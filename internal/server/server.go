@@ -8,6 +8,12 @@ import (
 	"syscall"
 
 	"github.com/nickqweaver/weave-queue/internal/store"
+	"github.com/nickqweaver/weave-queue/internal/utils"
+)
+
+const (
+	defaultLeaseDurationMS = 5000
+	defaultRetryFetchRatio = 0.20
 )
 
 type Status int
@@ -41,21 +47,47 @@ type Server struct {
 }
 
 type Config struct {
-	BatchSize       int
-	MaxQueue        int
-	MaxConcurrency  int
-	MaxRetries      int
-	MaxColdTimeout  int
-	LeaseDurationMS int
+	BatchSize          int
+	MaxQueue           int
+	MaxConcurrency     int
+	MaxRetries         int
+	MaxColdTimeout     int
+	LeaseDurationMS    int
+	RetryFetchRatio    float64
+	RetryBackoffBaseMS int
+	RetryBackoffMaxMS  int
 }
 
 func NewServer(s store.Store, c Config) Server {
+	leaseDurationMS := c.LeaseDurationMS
+	if leaseDurationMS <= 0 {
+		leaseDurationMS = defaultLeaseDurationMS
+	}
+
+	retryFetchRatio := c.RetryFetchRatio
+	if retryFetchRatio <= 0 {
+		retryFetchRatio = defaultRetryFetchRatio
+	}
+	if retryFetchRatio > 1 {
+		retryFetchRatio = 1
+	}
+
+	retryBackoffBaseMS := c.RetryBackoffBaseMS
+	if retryBackoffBaseMS <= 0 {
+		retryBackoffBaseMS = utils.DefaultRetryBackoffBaseMS
+	}
+
+	retryBackoffMaxMS := c.RetryBackoffMaxMS
+	if retryBackoffMaxMS <= 0 {
+		retryBackoffMaxMS = utils.DefaultRetryBackoffMaxMS
+	}
+
 	pending := make(chan Req, c.MaxQueue)
 	finished := make(chan Res, c.BatchSize)
 
 	consumer := NewConsumer(c.MaxConcurrency, pending, finished)
-	committer := NewCommitter(s, finished, c.MaxRetries)
-	fetcher := NewFetcher(pending, c.BatchSize, c.MaxRetries, c.MaxColdTimeout, c.LeaseDurationMS)
+	committer := NewCommitter(s, finished, c.MaxRetries, retryBackoffBaseMS, retryBackoffMaxMS)
+	fetcher := NewFetcher(pending, c.BatchSize, c.MaxRetries, c.MaxColdTimeout, leaseDurationMS, retryFetchRatio, retryBackoffBaseMS, retryBackoffMaxMS)
 	server := Server{store: s, consumer: consumer, fetcher: fetcher, committer: committer}
 
 	return server

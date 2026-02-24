@@ -8,22 +8,21 @@ import (
 	"github.com/nickqweaver/weave-queue/internal/utils"
 )
 
-const (
-	retryBackoffBaseMS = 500
-	retryBackoffMaxMS  = 30_000
-)
-
 type Committer struct {
-	store      store.Store
-	res        <-chan Res
-	maxRetries int
+	store              store.Store
+	res                <-chan Res
+	maxRetries         int
+	retryBackoffBaseMS int
+	retryBackoffMaxMS  int
 }
 
-func NewCommitter(s store.Store, res chan Res, maxRetries int) *Committer {
+func NewCommitter(s store.Store, res chan Res, maxRetries int, retryBackoffBaseMS int, retryBackoffMaxMS int) *Committer {
 	return &Committer{
-		store:      s,
-		res:        res,
-		maxRetries: max(0, maxRetries),
+		store:              s,
+		res:                res,
+		maxRetries:         max(0, maxRetries),
+		retryBackoffBaseMS: retryBackoffBaseMS,
+		retryBackoffMaxMS:  retryBackoffMaxMS,
 	}
 }
 
@@ -45,7 +44,7 @@ func (c *Committer) batchWrite(batch []Res) {
 			nextRetries := r.Job.Retries + 1
 
 			if nextRetries <= c.maxRetries {
-				retryAt := time.Now().UTC().Add(retryDelay(nextRetries))
+				retryAt := time.Now().UTC().Add(utils.RetryDelay(nextRetries, c.retryBackoffBaseMS, c.retryBackoffMaxMS))
 				update = store.JobUpdate{
 					Status:  store.Failed,
 					Retries: &nextRetries,
@@ -62,17 +61,6 @@ func (c *Committer) batchWrite(batch []Res) {
 			fmt.Printf("Error updating job %s: %v\n", jobID, err)
 		}
 	}
-}
-
-func retryDelay(attempt int) time.Duration {
-	timeout := retryBackoffBaseMS
-	delay := time.Duration(timeout)
-
-	for range max(1, attempt) {
-		timeout, delay = utils.Backoff(timeout, retryBackoffMaxMS, false)
-	}
-
-	return time.Millisecond * delay
 }
 
 func (c *Committer) run() {

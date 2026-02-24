@@ -6,17 +6,21 @@ import (
 
 	"github.com/nickqweaver/weave-queue/internal/store"
 	memory "github.com/nickqweaver/weave-queue/internal/store/adapters/memory"
+	"github.com/nickqweaver/weave-queue/internal/utils"
 )
 
 func TestNewServer_WiresComponentsAndChannelCapacities(t *testing.T) {
 	mem := memory.NewMemoryStore()
 	cfg := Config{
-		BatchSize:       7,
-		MaxQueue:        11,
-		MaxConcurrency:  3,
-		MaxRetries:      5,
-		MaxColdTimeout:  9000,
-		LeaseDurationMS: 5000,
+		BatchSize:          7,
+		MaxQueue:           11,
+		MaxConcurrency:     3,
+		MaxRetries:         5,
+		MaxColdTimeout:     9000,
+		LeaseDurationMS:    5000,
+		RetryFetchRatio:    0.35,
+		RetryBackoffBaseMS: 700,
+		RetryBackoffMaxMS:  40_000,
 	}
 
 	s := NewServer(mem, cfg)
@@ -42,6 +46,15 @@ func TestNewServer_WiresComponentsAndChannelCapacities(t *testing.T) {
 	}
 	if s.fetcher.LeaseDurationMS != cfg.LeaseDurationMS {
 		t.Fatalf("expected fetcher lease duration %d, got %d", cfg.LeaseDurationMS, s.fetcher.LeaseDurationMS)
+	}
+	if s.fetcher.RetryFetchRatio != cfg.RetryFetchRatio {
+		t.Fatalf("expected fetcher retry fetch ratio %.2f, got %.2f", cfg.RetryFetchRatio, s.fetcher.RetryFetchRatio)
+	}
+	if s.fetcher.RetryBackoffBaseMS != cfg.RetryBackoffBaseMS {
+		t.Fatalf("expected fetcher retry backoff base %d, got %d", cfg.RetryBackoffBaseMS, s.fetcher.RetryBackoffBaseMS)
+	}
+	if s.fetcher.RetryBackoffMaxMS != cfg.RetryBackoffMaxMS {
+		t.Fatalf("expected fetcher retry backoff max %d, got %d", cfg.RetryBackoffMaxMS, s.fetcher.RetryBackoffMaxMS)
 	}
 	if s.consumer.concurrency != cfg.MaxConcurrency {
 		t.Fatalf("expected consumer concurrency %d, got %d", cfg.MaxConcurrency, s.consumer.concurrency)
@@ -79,12 +92,15 @@ func TestNewServer_WiresComponentsAndChannelCapacities(t *testing.T) {
 func TestServerClose_ShutsDownRunAndIsIdempotent(t *testing.T) {
 	mem := memory.NewMemoryStore()
 	cfg := Config{
-		BatchSize:       4,
-		MaxQueue:        8,
-		MaxConcurrency:  2,
-		MaxRetries:      3,
-		MaxColdTimeout:  500,
-		LeaseDurationMS: 5000,
+		BatchSize:          4,
+		MaxQueue:           8,
+		MaxConcurrency:     2,
+		MaxRetries:         3,
+		MaxColdTimeout:     500,
+		LeaseDurationMS:    5000,
+		RetryFetchRatio:    0.20,
+		RetryBackoffBaseMS: 500,
+		RetryBackoffMaxMS:  30_000,
 	}
 
 	s := NewServer(mem, cfg)
@@ -114,6 +130,59 @@ func TestServerClose_ShutsDownRunAndIsIdempotent(t *testing.T) {
 	case <-closeDone:
 	case <-time.After(250 * time.Millisecond):
 		t.Fatal("expected second Close call to return immediately")
+	}
+}
+
+func TestNewServer_DefaultsBackoffValuesWithoutClampingToBase(t *testing.T) {
+	mem := memory.NewMemoryStore()
+
+	s := NewServer(mem, Config{
+		BatchSize:      4,
+		MaxQueue:       8,
+		MaxConcurrency: 2,
+	})
+
+	if s.fetcher.RetryFetchRatio != defaultRetryFetchRatio {
+		t.Fatalf("expected default retry fetch ratio %.2f, got %.2f", defaultRetryFetchRatio, s.fetcher.RetryFetchRatio)
+	}
+
+	if s.fetcher.RetryBackoffBaseMS != utils.DefaultRetryBackoffBaseMS {
+		t.Fatalf("expected default retry backoff base %d, got %d", utils.DefaultRetryBackoffBaseMS, s.fetcher.RetryBackoffBaseMS)
+	}
+	if s.fetcher.RetryBackoffMaxMS != utils.DefaultRetryBackoffMaxMS {
+		t.Fatalf("expected default retry backoff max %d, got %d", utils.DefaultRetryBackoffMaxMS, s.fetcher.RetryBackoffMaxMS)
+	}
+	if s.committer.retryBackoffBaseMS != utils.DefaultRetryBackoffBaseMS {
+		t.Fatalf("expected committer default retry backoff base %d, got %d", utils.DefaultRetryBackoffBaseMS, s.committer.retryBackoffBaseMS)
+	}
+	if s.committer.retryBackoffMaxMS != utils.DefaultRetryBackoffMaxMS {
+		t.Fatalf("expected committer default retry backoff max %d, got %d", utils.DefaultRetryBackoffMaxMS, s.committer.retryBackoffMaxMS)
+	}
+
+	s = NewServer(mem, Config{
+		BatchSize:          4,
+		MaxQueue:           8,
+		MaxConcurrency:     2,
+		RetryFetchRatio:    0.60,
+		RetryBackoffBaseMS: 5000,
+		RetryBackoffMaxMS:  1000,
+	})
+
+	if s.fetcher.RetryFetchRatio != 0.60 {
+		t.Fatalf("expected retry fetch ratio %.2f, got %.2f", 0.60, s.fetcher.RetryFetchRatio)
+	}
+
+	if s.fetcher.RetryBackoffBaseMS != 5000 {
+		t.Fatalf("expected retry backoff base %d, got %d", 5000, s.fetcher.RetryBackoffBaseMS)
+	}
+	if s.fetcher.RetryBackoffMaxMS != 1000 {
+		t.Fatalf("expected retry backoff max %d, got %d", 1000, s.fetcher.RetryBackoffMaxMS)
+	}
+	if s.committer.retryBackoffBaseMS != 5000 {
+		t.Fatalf("expected committer retry backoff base %d, got %d", 5000, s.committer.retryBackoffBaseMS)
+	}
+	if s.committer.retryBackoffMaxMS != 1000 {
+		t.Fatalf("expected committer retry backoff max %d, got %d", 1000, s.committer.retryBackoffMaxMS)
 	}
 }
 
