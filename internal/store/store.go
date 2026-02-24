@@ -44,7 +44,7 @@ type JobUpdate struct {
 
 type ClaimOptions struct {
 	Limit              int
-	LeaseDurationMS    int
+	LeaseTTL           time.Duration
 	RetryFetchRatio    float64
 	MaxRetries         int
 	RetryBackoffBaseMS int

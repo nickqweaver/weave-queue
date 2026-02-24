@@ -36,7 +36,7 @@ func main() {
 		MaxQueue:           1000,
 		MaxConcurrency:     4,
 		MaxRetries:         3,
-		LeaseDurationMS:    5000,
+		LeaseTTL:           5 * time.Second,
 		RetryFetchRatio:    0.20,
 		RetryBackoffBaseMS: 500,
 		RetryBackoffMaxMS:  30_000,

@@ -55,10 +55,14 @@ func (n *MemoryStore) ClaimAvailable(opts store.ClaimOptions) []store.Job {
 	if retryFetchRatio > 1 {
 		retryFetchRatio = 1
 	}
+	leaseTTL := opts.LeaseTTL
+	if leaseTTL < 0 {
+		leaseTTL = 0
+	}
 	now := time.Now().UTC()
 	n.recoverExpiredLeasesLocked(now, maxRetries, opts.RetryBackoffBaseMS, opts.RetryBackoffMaxMS)
 
-	leaseExpiresAt := now.Add(time.Millisecond * time.Duration(max(0, opts.LeaseDurationMS)))
+	leaseExpiresAt := now.Add(leaseTTL)
 	claimed := make([]store.Job, 0, opts.Limit)
 	retryTarget := int(math.Floor(float64(opts.Limit) * retryFetchRatio))
 	if retryFetchRatio > 0 && retryTarget == 0 {

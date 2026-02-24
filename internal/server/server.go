@@ -6,13 +6,14 @@ import (
 	"os/signal"
 	"sync"
 	"syscall"
+	"time"
 
 	"github.com/nickqweaver/weave-queue/internal/store"
 	"github.com/nickqweaver/weave-queue/internal/utils"
 )
 
 const (
-	defaultLeaseDurationMS = 5000
+	defaultLeaseTTL        = 5 * time.Second
 	defaultRetryFetchRatio = 0.20
 )
 
@@ -52,16 +53,16 @@ type Config struct {
 	MaxConcurrency     int
 	MaxRetries         int
 	MaxColdTimeout     int
-	LeaseDurationMS    int
+	LeaseTTL           time.Duration
 	RetryFetchRatio    float64
 	RetryBackoffBaseMS int
 	RetryBackoffMaxMS  int
 }
 
 func NewServer(s store.Store, c Config) Server {
-	leaseDurationMS := c.LeaseDurationMS
-	if leaseDurationMS <= 0 {
-		leaseDurationMS = defaultLeaseDurationMS
+	leaseTTL := c.LeaseTTL
+	if leaseTTL <= 0 {
+		leaseTTL = defaultLeaseTTL
 	}
 
 	retryFetchRatio := c.RetryFetchRatio
@@ -87,7 +88,16 @@ func NewServer(s store.Store, c Config) Server {
 
 	consumer := NewConsumer(c.MaxConcurrency, pending, finished)
 	committer := NewCommitter(s, finished, c.MaxRetries, retryBackoffBaseMS, retryBackoffMaxMS)
-	fetcher := NewFetcher(pending, c.BatchSize, c.MaxRetries, c.MaxColdTimeout, leaseDurationMS, retryFetchRatio, retryBackoffBaseMS, retryBackoffMaxMS)
+	fetcher := NewFetcher(
+		pending,
+		c.BatchSize,
+		c.MaxRetries,
+		c.MaxColdTimeout,
+		leaseTTL,
+		retryFetchRatio,
+		retryBackoffBaseMS,
+		retryBackoffMaxMS,
+	)
 	server := Server{store: s, consumer: consumer, fetcher: fetcher, committer: committer}
 
 	return server

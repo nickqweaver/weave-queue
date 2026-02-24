@@ -17,7 +17,7 @@ func TestNewServer_WiresComponentsAndChannelCapacities(t *testing.T) {
 		MaxConcurrency:     3,
 		MaxRetries:         5,
 		MaxColdTimeout:     9000,
-		LeaseDurationMS:    5000,
+		LeaseTTL:           5 * time.Second,
 		RetryFetchRatio:    0.35,
 		RetryBackoffBaseMS: 700,
 		RetryBackoffMaxMS:  40_000,
@@ -44,8 +44,8 @@ func TestNewServer_WiresComponentsAndChannelCapacities(t *testing.T) {
 	if s.fetcher.MaxColdTimeout != cfg.MaxColdTimeout {
 		t.Fatalf("expected fetcher cold timeout %d, got %d", cfg.MaxColdTimeout, s.fetcher.MaxColdTimeout)
 	}
-	if s.fetcher.LeaseDurationMS != cfg.LeaseDurationMS {
-		t.Fatalf("expected fetcher lease duration %d, got %d", cfg.LeaseDurationMS, s.fetcher.LeaseDurationMS)
+	if s.fetcher.LeaseTTL != cfg.LeaseTTL {
+		t.Fatalf("expected fetcher lease ttl %v, got %v", cfg.LeaseTTL, s.fetcher.LeaseTTL)
 	}
 	if s.fetcher.RetryFetchRatio != cfg.RetryFetchRatio {
 		t.Fatalf("expected fetcher retry fetch ratio %.2f, got %.2f", cfg.RetryFetchRatio, s.fetcher.RetryFetchRatio)
@@ -97,7 +97,7 @@ func TestServerClose_ShutsDownRunAndIsIdempotent(t *testing.T) {
 		MaxConcurrency:     2,
 		MaxRetries:         3,
 		MaxColdTimeout:     500,
-		LeaseDurationMS:    5000,
+		LeaseTTL:           5 * time.Second,
 		RetryFetchRatio:    0.20,
 		RetryBackoffBaseMS: 500,
 		RetryBackoffMaxMS:  30_000,

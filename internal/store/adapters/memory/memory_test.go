@@ -9,7 +9,7 @@ import (
 	"github.com/nickqweaver/weave-queue/internal/store"
 )
 
-const testLeaseDurationMS = 5000
+const testLeaseTTL = 5 * time.Second
 
 func TestFetchAndClaim_ClaimsTwentyPercentDueRetries(t *testing.T) {
 	m := NewMemoryStore()
@@ -427,7 +427,7 @@ func byID(jobs []store.Job) map[string]store.Job {
 func claimOpts(limit int) store.ClaimOptions {
 	return store.ClaimOptions{
 		Limit:              limit,
-		LeaseDurationMS:    testLeaseDurationMS,
+		LeaseTTL:           testLeaseTTL,
 		RetryFetchRatio:    0.20,
 		MaxRetries:         3,
 		RetryBackoffBaseMS: 500,
