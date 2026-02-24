@@ -41,11 +41,12 @@ type Server struct {
 }
 
 type Config struct {
-	BatchSize      int
-	MaxQueue       int
-	MaxConcurrency int
-	MaxRetries     int
-	MaxColdTimeout int
+	BatchSize       int
+	MaxQueue        int
+	MaxConcurrency  int
+	MaxRetries      int
+	MaxColdTimeout  int
+	LeaseDurationMS int
 }
 
 func NewServer(s store.Store, c Config) Server {
@@ -54,7 +55,7 @@ func NewServer(s store.Store, c Config) Server {
 
 	consumer := NewConsumer(c.MaxConcurrency, pending, finished)
 	committer := NewCommitter(s, finished, c.MaxRetries)
-	fetcher := NewFetcher(pending, c.BatchSize, c.MaxRetries, c.MaxColdTimeout)
+	fetcher := NewFetcher(pending, c.BatchSize, c.MaxRetries, c.MaxColdTimeout, c.LeaseDurationMS)
 	server := Server{store: s, consumer: consumer, fetcher: fetcher, committer: committer}
 
 	return server

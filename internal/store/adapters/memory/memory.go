@@ -40,7 +40,7 @@ func (n *MemoryStore) FetchJobs(status store.Status, limit int) []store.Job {
 	return filtered
 }
 
-func (n *MemoryStore) FetchAndClaim(curr store.Status, to store.Status, limit int) []store.Job {
+func (n *MemoryStore) FetchAndClaim(curr store.Status, to store.Status, limit int, leaseDurationMS int) []store.Job {
 	n.mu.Lock()
 	defer n.mu.Unlock()
 
@@ -49,6 +49,7 @@ func (n *MemoryStore) FetchAndClaim(curr store.Status, to store.Status, limit in
 	}
 
 	now := time.Now().UTC()
+	leaseExpiresAt := now.Add(time.Millisecond * time.Duration(max(0, leaseDurationMS)))
 	claimed := make([]store.Job, 0, limit)
 	retryTarget := max(1, int(math.Floor(float64(limit)*retryFetchRatio)))
 	retryTarget = min(limit, retryTarget)
@@ -68,7 +69,7 @@ func (n *MemoryStore) FetchAndClaim(curr store.Status, to store.Status, limit in
 		}
 
 		n.jobs[i].Status = to
-		n.jobs[i].LeasedAt = &now
+		n.jobs[i].LeaseExpiresAt = &leaseExpiresAt
 		n.jobs[i].RetryAt = nil
 		claimed = append(claimed, n.jobs[i])
 	}
@@ -83,7 +84,7 @@ func (n *MemoryStore) FetchAndClaim(curr store.Status, to store.Status, limit in
 		}
 
 		n.jobs[i].Status = to
-		n.jobs[i].LeasedAt = &now
+		n.jobs[i].LeaseExpiresAt = &leaseExpiresAt
 		claimed = append(claimed, n.jobs[i])
 	}
 
@@ -102,7 +103,7 @@ func (n *MemoryStore) FetchAndClaim(curr store.Status, to store.Status, limit in
 		}
 
 		n.jobs[i].Status = to
-		n.jobs[i].LeasedAt = &now
+		n.jobs[i].LeaseExpiresAt = &leaseExpiresAt
 		n.jobs[i].RetryAt = nil
 		claimed = append(claimed, n.jobs[i])
 	}
@@ -145,4 +146,33 @@ func (n *MemoryStore) GetAllJobs() []store.Job {
 	result := make([]store.Job, len(n.jobs))
 	copy(result, n.jobs)
 	return result
+}
+
+func (n *MemoryStore) RecoverExpiredLeases(now time.Time, limit int) []store.Job {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+
+	if limit <= 0 {
+		return nil
+	}
+
+	res := make([]store.Job, 0, limit)
+
+	for i := range n.jobs {
+		if len(res) >= limit {
+			break
+		}
+
+		if n.jobs[i].Status != store.InFlight {
+			continue
+		}
+
+		if n.jobs[i].LeaseExpiresAt == nil || n.jobs[i].LeaseExpiresAt.After(now) {
+			continue
+		}
+
+		res = append(res, n.jobs[i])
+	}
+
+	return res
 }

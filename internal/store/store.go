@@ -27,13 +27,13 @@ func (s Status) String() string {
 }
 
 type Job struct {
-	ID       string
-	Queue    string
-	Status   Status
-	Timeout  int
-	LeasedAt *time.Time
-	RetryAt  *time.Time
-	Retries  int
+	ID             string
+	Queue          string
+	Status         Status
+	Timeout        int
+	LeaseExpiresAt *time.Time
+	RetryAt        *time.Time
+	Retries        int
 }
 
 type JobUpdate struct {
@@ -44,9 +44,10 @@ type JobUpdate struct {
 
 type Store interface {
 	FetchJobs(status Status, limit int) []Job
-	FetchAndClaim(curr Status, to Status, limit int) []Job
+	FetchAndClaim(curr Status, to Status, limit int, leaseDurationMS int) []Job
 	FailJob(id string) error
 	AddJob(job Job) error
 	UpdateJob(id string, update JobUpdate) error
 	GetAllJobs() []Job
+	RecoverExpiredLeases(now time.Time, limit int) []Job
 }

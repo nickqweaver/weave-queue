@@ -184,7 +184,7 @@ func (s *committerStoreStub) FetchJobs(status store.Status, limit int) []store.J
 	return nil
 }
 
-func (s *committerStoreStub) FetchAndClaim(curr store.Status, to store.Status, limit int) []store.Job {
+func (s *committerStoreStub) FetchAndClaim(curr store.Status, to store.Status, limit int, leaseDurationMS int) []store.Job {
 	return nil
 }
 
@@ -223,5 +223,9 @@ func (s *committerStoreStub) UpdateJob(id string, update store.JobUpdate) error 
 }
 
 func (s *committerStoreStub) GetAllJobs() []store.Job {
+	return nil
+}
+
+func (s *committerStoreStub) RecoverExpiredLeases(now time.Time, limit int) []store.Job {
 	return nil
 }

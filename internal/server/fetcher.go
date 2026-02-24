@@ -10,18 +10,20 @@ import (
 )
 
 type Fetcher struct {
-	BatchSize      int
-	MaxRetries     int
-	MaxColdTimeout int
-	pending        chan Req
+	BatchSize       int
+	MaxRetries      int
+	MaxColdTimeout  int
+	LeaseDurationMS int
+	pending         chan Req
 }
 
-func NewFetcher(pending chan Req, batchSize int, maxRetries int, maxColdTimeout int) *Fetcher {
+func NewFetcher(pending chan Req, batchSize int, maxRetries int, maxColdTimeout int, leaseDurationMS int) *Fetcher {
 	return &Fetcher{
-		BatchSize:      batchSize,
-		MaxColdTimeout: maxColdTimeout,
-		MaxRetries:     maxRetries,
-		pending:        pending,
+		BatchSize:       batchSize,
+		MaxColdTimeout:  maxColdTimeout,
+		MaxRetries:      maxRetries,
+		LeaseDurationMS: leaseDurationMS,
+		pending:         pending,
 	}
 }
 
@@ -43,7 +45,7 @@ func (f *Fetcher) fetch(ctx context.Context, s store.Store) {
 			return
 		}
 
-		ready := s.FetchAndClaim(store.Ready, store.InFlight, f.BatchSize)
+		ready := s.FetchAndClaim(store.Ready, store.InFlight, f.BatchSize, f.LeaseDurationMS)
 		fmt.Println("Fetching More Jobs...")
 
 		if len(ready) == 0 {

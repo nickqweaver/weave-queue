@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"strconv"
-	"time"
 
 	"github.com/nickqweaver/weave-queue/internal/store"
 )
@@ -50,7 +49,7 @@ func (w *Worker) Run(ctx context.Context) {
 	for r := range w.req {
 		j := r.Job
 
-		if j.LeasedAt == nil {
+		if j.LeaseExpiresAt == nil {
 			response := Res{
 				Status:  NAck,
 				Message: "Job has not been leased",
@@ -61,7 +60,7 @@ func (w *Worker) Run(ctx context.Context) {
 
 			w.res <- response
 		} else {
-			deadline := j.LeasedAt.Add(time.Millisecond * time.Duration(j.Timeout))
+			deadline := *j.LeaseExpiresAt
 			// Handler placeholder, should return ok, err then we can ack/nack based on that
 			jobCtx, cancel := context.WithDeadline(ctx, deadline)
 			if _, err := doWork(jobCtx, j); err != nil {

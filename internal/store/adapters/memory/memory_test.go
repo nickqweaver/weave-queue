@@ -9,6 +9,8 @@ import (
 	"github.com/nickqweaver/weave-queue/internal/store"
 )
 
+const testLeaseDurationMS = 5000
+
 func TestFetchAndClaim_ClaimsTwentyPercentDueRetries(t *testing.T) {
 	m := NewMemoryStore()
 	now := time.Now().UTC()
@@ -29,7 +31,7 @@ func TestFetchAndClaim_ClaimsTwentyPercentDueRetries(t *testing.T) {
 		})
 	}
 
-	claimed := m.FetchAndClaim(store.Ready, store.InFlight, 10)
+	claimed := m.FetchAndClaim(store.Ready, store.InFlight, 10, testLeaseDurationMS)
 	if got := len(claimed); got != 10 {
 		t.Fatalf("expected 10 claimed jobs, got %d", got)
 	}
@@ -42,8 +44,8 @@ func TestFetchAndClaim_ClaimsTwentyPercentDueRetries(t *testing.T) {
 		if job.Status != store.InFlight {
 			t.Fatalf("expected claimed status %s, got %s", store.InFlight, job.Status)
 		}
-		if job.LeasedAt == nil {
-			t.Fatalf("expected claimed job %s to have a lease timestamp", job.ID)
+		if job.LeaseExpiresAt == nil {
+			t.Fatalf("expected claimed job %s to have a lease expiration", job.ID)
 		}
 
 		if strings.HasPrefix(job.ID, "retry-") {
@@ -87,7 +89,7 @@ func TestFetchAndClaim_SmallBatchClaimsAtLeastOneRetry(t *testing.T) {
 		store.Job{ID: "ready-4", Status: store.Ready},
 	)
 
-	claimed := m.FetchAndClaim(store.Ready, store.InFlight, 4)
+	claimed := m.FetchAndClaim(store.Ready, store.InFlight, 4, testLeaseDurationMS)
 	if got := len(claimed); got != 4 {
 		t.Fatalf("expected 4 claimed jobs, got %d", got)
 	}
@@ -117,7 +119,7 @@ func TestFetchAndClaim_FillsBatchFromDueRetriesWhenNoFreshJobs(t *testing.T) {
 		})
 	}
 
-	claimed := m.FetchAndClaim(store.Ready, store.InFlight, 10)
+	claimed := m.FetchAndClaim(store.Ready, store.InFlight, 10, testLeaseDurationMS)
 	if got := len(claimed); got != 10 {
 		t.Fatalf("expected 10 claimed jobs, got %d", got)
 	}
@@ -129,8 +131,8 @@ func TestFetchAndClaim_FillsBatchFromDueRetriesWhenNoFreshJobs(t *testing.T) {
 		if job.Status != store.InFlight {
 			t.Fatalf("expected claimed status %s, got %s", store.InFlight, job.Status)
 		}
-		if job.LeasedAt == nil {
-			t.Fatalf("expected claimed job %s to have a lease timestamp", job.ID)
+		if job.LeaseExpiresAt == nil {
+			t.Fatalf("expected claimed job %s to have a lease expiration", job.ID)
 		}
 		if job.RetryAt != nil {
 			t.Fatalf("expected claimed retry job %s retryAt to be cleared", job.ID)
@@ -156,7 +158,7 @@ func TestFetchAndClaim_BackfillsWithDueRetriesWhenFreshInsufficient(t *testing.T
 		store.Job{ID: "ready-2", Status: store.Ready},
 	)
 
-	claimed := m.FetchAndClaim(store.Ready, store.InFlight, 6)
+	claimed := m.FetchAndClaim(store.Ready, store.InFlight, 6, testLeaseDurationMS)
 	if got := len(claimed); got != 6 {
 		t.Fatalf("expected 6 claimed jobs, got %d", got)
 	}
@@ -203,7 +205,7 @@ func TestFetchAndClaim_OnlyClaimsDueRetries(t *testing.T) {
 		addJobs(t, m, store.Job{ID: fmt.Sprintf("ready-%d", i+1), Status: store.Ready})
 	}
 
-	claimed := m.FetchAndClaim(store.Ready, store.InFlight, 5)
+	claimed := m.FetchAndClaim(store.Ready, store.InFlight, 5, testLeaseDurationMS)
 	claimedIDs := byID(claimed)
 
 	if _, ok := claimedIDs["retry-due"]; !ok {
@@ -238,7 +240,7 @@ func TestFetchAndClaim_ReturnsPartialBatchWhenInsufficientJobs(t *testing.T) {
 		store.Job{ID: "ready-1", Status: store.Ready},
 	)
 
-	claimed := m.FetchAndClaim(store.Ready, store.InFlight, 10)
+	claimed := m.FetchAndClaim(store.Ready, store.InFlight, 10, testLeaseDurationMS)
 	if got := len(claimed); got != 2 {
 		t.Fatalf("expected 2 claimed jobs, got %d", got)
 	}
@@ -260,7 +262,7 @@ func TestFetchAndClaim_UsesCurrStatusForFreshJobs(t *testing.T) {
 		store.Job{ID: "ready-1", Status: store.Ready},
 	)
 
-	claimed := m.FetchAndClaim(store.Succeeded, store.InFlight, 5)
+	claimed := m.FetchAndClaim(store.Succeeded, store.InFlight, 5, testLeaseDurationMS)
 	if got := len(claimed); got != 1 {
 		t.Fatalf("expected 1 claimed job, got %d", got)
 	}

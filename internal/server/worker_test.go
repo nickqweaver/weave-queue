@@ -74,13 +74,13 @@ func TestWorkerRun_JobWithoutLeaseIsNacked(t *testing.T) {
 	w := NewWorker(1, req, res)
 
 	now := time.Now().UTC()
-	lease := now
+	leaseExpiresAt := now.Add(5 * time.Second)
 	missingLeaseID := "7"
 
 	jobs := []store.Job{
-		{ID: "1", Queue: "my_queue", Status: store.InFlight, Timeout: 5000, LeasedAt: &lease},
-		{ID: missingLeaseID, Queue: "my_queue", Status: store.InFlight, Timeout: 5000, LeasedAt: nil},
-		{ID: "3", Queue: "my_queue", Status: store.InFlight, Timeout: 5000, LeasedAt: &lease},
+		{ID: "1", Queue: "my_queue", Status: store.InFlight, Timeout: 5000, LeaseExpiresAt: &leaseExpiresAt},
+		{ID: missingLeaseID, Queue: "my_queue", Status: store.InFlight, Timeout: 5000, LeaseExpiresAt: nil},
+		{ID: "3", Queue: "my_queue", Status: store.InFlight, Timeout: 5000, LeaseExpiresAt: &leaseExpiresAt},
 	}
 
 	for _, job := range jobs {
@@ -207,22 +207,22 @@ func jobsWithOneExpiredLease(total int, expiredIndex int) ([]store.Job, string) 
 
 	for i := 0; i < total; i++ {
 		id := strconv.Itoa((i * 2) + 1)
-		leasedAt := now
+		leaseExpiresAt := now.Add(5 * time.Second)
 		timeout := 5000
 
 		if i == expiredIndex {
-			leasedAt = now.Add(-2 * time.Second)
+			leaseExpiresAt = now.Add(-2 * time.Second)
 			timeout = 1
 			timedOutID = id
 		}
 
-		lease := leasedAt
+		lease := leaseExpiresAt
 		jobs = append(jobs, store.Job{
-			ID:       id,
-			Queue:    "my_queue",
-			Status:   store.InFlight,
-			Timeout:  timeout,
-			LeasedAt: &lease,
+			ID:             id,
+			Queue:          "my_queue",
+			Status:         store.InFlight,
+			Timeout:        timeout,
+			LeaseExpiresAt: &lease,
 		})
 	}
 

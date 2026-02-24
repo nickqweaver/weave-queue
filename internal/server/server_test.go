@@ -11,11 +11,12 @@ import (
 func TestNewServer_WiresComponentsAndChannelCapacities(t *testing.T) {
 	mem := memory.NewMemoryStore()
 	cfg := Config{
-		BatchSize:      7,
-		MaxQueue:       11,
-		MaxConcurrency: 3,
-		MaxRetries:     5,
-		MaxColdTimeout: 9000,
+		BatchSize:       7,
+		MaxQueue:        11,
+		MaxConcurrency:  3,
+		MaxRetries:      5,
+		MaxColdTimeout:  9000,
+		LeaseDurationMS: 5000,
 	}
 
 	s := NewServer(mem, cfg)
@@ -38,6 +39,9 @@ func TestNewServer_WiresComponentsAndChannelCapacities(t *testing.T) {
 	}
 	if s.fetcher.MaxColdTimeout != cfg.MaxColdTimeout {
 		t.Fatalf("expected fetcher cold timeout %d, got %d", cfg.MaxColdTimeout, s.fetcher.MaxColdTimeout)
+	}
+	if s.fetcher.LeaseDurationMS != cfg.LeaseDurationMS {
+		t.Fatalf("expected fetcher lease duration %d, got %d", cfg.LeaseDurationMS, s.fetcher.LeaseDurationMS)
 	}
 	if s.consumer.concurrency != cfg.MaxConcurrency {
 		t.Fatalf("expected consumer concurrency %d, got %d", cfg.MaxConcurrency, s.consumer.concurrency)
@@ -75,11 +79,12 @@ func TestNewServer_WiresComponentsAndChannelCapacities(t *testing.T) {
 func TestServerClose_ShutsDownRunAndIsIdempotent(t *testing.T) {
 	mem := memory.NewMemoryStore()
 	cfg := Config{
-		BatchSize:      4,
-		MaxQueue:       8,
-		MaxConcurrency: 2,
-		MaxRetries:     3,
-		MaxColdTimeout: 500,
+		BatchSize:       4,
+		MaxQueue:        8,
+		MaxConcurrency:  2,
+		MaxRetries:      3,
+		MaxColdTimeout:  500,
+		LeaseDurationMS: 5000,
 	}
 
 	s := NewServer(mem, cfg)

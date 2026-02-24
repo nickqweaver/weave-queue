@@ -94,12 +94,12 @@ func TestConsumerRun_NoDroppedOrDuplicateResponses(t *testing.T) {
 }
 
 func leasedJob(id string, leasedAt time.Time) store.Job {
-	lease := leasedAt
+	lease := leasedAt.Add(time.Minute)
 	return store.Job{
-		ID:       id,
-		Queue:    "my_queue",
-		Status:   store.InFlight,
-		Timeout:  60000,
-		LeasedAt: &lease,
+		ID:             id,
+		Queue:          "my_queue",
+		Status:         store.InFlight,
+		Timeout:        60000,
+		LeaseExpiresAt: &lease,
 	}
 }

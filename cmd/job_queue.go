@@ -31,11 +31,12 @@ func main() {
 	mem := memory.NewMemoryStore()
 
 	server := server.NewServer(mem, server.Config{
-		MaxColdTimeout: 5000,
-		BatchSize:      100,
-		MaxQueue:       1000,
-		MaxConcurrency: 4,
-		MaxRetries:     3,
+		MaxColdTimeout:  5000,
+		BatchSize:       100,
+		MaxQueue:        1000,
+		MaxConcurrency:  4,
+		MaxRetries:      3,
+		LeaseDurationMS: 5000,
 	})
 	client := client.NewClient(mem)
 	for id := 1; id <= 10000; id++ {
