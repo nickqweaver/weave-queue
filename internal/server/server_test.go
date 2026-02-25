@@ -111,7 +111,7 @@ func TestServerClose_ShutsDownRunAndIsIdempotent(t *testing.T) {
 		close(runDone)
 	}()
 
-	waitForServerStart(t, &s, time.Second)
+	waitForServerStart(t, s, time.Second)
 	s.Close()
 
 	select {

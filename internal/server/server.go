@@ -59,7 +59,7 @@ type Config struct {
 	RetryBackoffMaxMS  int
 }
 
-func NewServer(s store.Store, c Config) Server {
+func NewServer(s store.Store, c Config) *Server {
 	leaseTTL := c.LeaseTTL
 	if leaseTTL <= 0 {
 		leaseTTL = defaultLeaseTTL
@@ -98,7 +98,7 @@ func NewServer(s store.Store, c Config) Server {
 		retryBackoffBaseMS,
 		retryBackoffMaxMS,
 	)
-	server := Server{store: s, consumer: consumer, fetcher: fetcher, committer: committer}
+	server := &Server{store: s, consumer: consumer, fetcher: fetcher, committer: committer}
 
 	return server
 }
