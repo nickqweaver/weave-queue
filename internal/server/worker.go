@@ -45,6 +45,7 @@ func doWork(ctx context.Context, job store.Job) (bool, error) {
 	return true, nil
 }
 
+// In here we would set a tick that pings heartbeat every configurale second
 func (w *Worker) Run(ctx context.Context) {
 	for r := range w.req {
 		j := r.Job

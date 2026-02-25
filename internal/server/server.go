@@ -13,7 +13,7 @@ import (
 )
 
 const (
-	defaultLeaseTTL        = 5 * time.Second
+	defaultLeaseTTL        = 15 * time.Second
 	defaultRetryFetchRatio = 0.20
 )
 
@@ -85,9 +85,17 @@ func NewServer(s store.Store, c Config) Server {
 
 	pending := make(chan Req, c.MaxQueue)
 	finished := make(chan Res, c.BatchSize)
+	heartbeat := make(chan HeartBeat)
 
-	consumer := NewConsumer(c.MaxConcurrency, pending, finished)
-	committer := NewCommitter(s, finished, c.MaxRetries, retryBackoffBaseMS, retryBackoffMaxMS)
+	consumer := NewConsumer(c.MaxConcurrency, pending, finished, heartbeat)
+	committer := NewCommitter(
+		s,
+		finished,
+		c.MaxRetries,
+		retryBackoffBaseMS,
+		retryBackoffMaxMS,
+		heartbeat,
+	)
 	fetcher := NewFetcher(
 		pending,
 		c.BatchSize,
@@ -129,7 +137,7 @@ func (s *Server) Run() {
 
 	go func() {
 		defer wg.Done()
-		s.committer.run()
+		s.committer.run(ctx)
 	}()
 
 	go func() {

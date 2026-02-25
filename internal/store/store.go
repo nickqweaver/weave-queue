@@ -37,9 +37,10 @@ type Job struct {
 }
 
 type JobUpdate struct {
-	Status  Status
-	Retries *int
-	RetryAt *time.Time
+	Status         Status
+	Retries        *int
+	RetryAt        *time.Time
+	LeaseExpiresAt *time.Time
 }
 
 type ClaimOptions struct {

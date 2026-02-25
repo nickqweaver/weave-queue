@@ -14,18 +14,26 @@ type Pending struct {
 type Consumer struct {
 	pending     Pending
 	concurrency int
+	heartbeat   chan HeartBeat
 }
 
-func NewConsumer(concurrency int, req chan Req, res chan Res) *Consumer {
+type HeartBeat struct {
+	workerId int
+	jobId    int
+}
+
+func NewConsumer(concurrency int, req chan Req, res chan Res, heartbeat chan HeartBeat) *Consumer {
 	return &Consumer{
 		pending:     Pending{req: req, res: res},
 		concurrency: concurrency,
+		heartbeat:   heartbeat,
 	}
 }
 
 func (c *Consumer) Cleanup() {
 	fmt.Println("Shutting down consumer, closing response channel")
 	close(c.pending.res)
+	close(c.heartbeat)
 }
 
 func (c *Consumer) Run(ctx context.Context, queue string) {
