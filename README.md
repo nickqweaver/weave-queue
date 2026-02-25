@@ -62,6 +62,20 @@ func handleEmail(ctx context.Context, job queue.Job) error {
 
 See [examples/basic](examples/basic/main.go) for a complete working example.
 
+## Development
+
+Use the Makefile for common development tasks:
+
+```bash
+make help      # Show all available targets
+make test      # Run tests
+make race      # Run tests with race detector
+make vet       # Run go vet
+make lint      # Run golangci-lint
+make check     # Run all quality checks
+make ci        # Run CI checks locally
+```
+
 ## Documentation
 
 - [Architecture Overview](docs/architecture.md) - System design and components
