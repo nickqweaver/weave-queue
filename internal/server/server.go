@@ -57,6 +57,7 @@ type Config struct {
 	RetryFetchRatio    float64
 	RetryBackoffBaseMS int
 	RetryBackoffMaxMS  int
+	ClaimOptions       store.ClaimOptions
 }
 
 func NewServer(s store.Store, c Config) Server {
@@ -87,7 +88,7 @@ func NewServer(s store.Store, c Config) Server {
 	finished := make(chan Res, c.BatchSize)
 	heartbeat := make(chan HeartBeat)
 
-	consumer := NewConsumer(c.MaxConcurrency, pending, finished, heartbeat)
+	consumer := NewConsumer(&c, pending, finished, heartbeat)
 	committer := NewCommitter(
 		s,
 		finished,

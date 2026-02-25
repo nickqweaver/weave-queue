@@ -22,10 +22,10 @@ type HeartBeat struct {
 	jobId    int
 }
 
-func NewConsumer(concurrency int, req chan Req, res chan Res, heartbeat chan HeartBeat) *Consumer {
+func NewConsumer(opts *Config, req chan Req, res chan Res, heartbeat chan HeartBeat) *Consumer {
 	return &Consumer{
 		pending:     Pending{req: req, res: res},
-		concurrency: concurrency,
+		concurrency: opts.MaxConcurrency,
 		heartbeat:   heartbeat,
 	}
 }
