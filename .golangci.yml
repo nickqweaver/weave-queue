@@ -1,0 +1,141 @@
+# golangci-lint configuration
+# https://golangci-lint.run/usage/configuration/
+
+run:
+  # Timeout for analysis
+  timeout: 5m
+  
+  # Exit code when at least one issue was found
+  issues-exit-code: 1
+  
+  # Include test files
+  tests: true
+
+# Output configuration
+output:
+  # Format: colored-line-number|line-number|json|tab|checkstyle|code-climate
+  format: colored-line-number
+  
+  # Print lines of code with issue
+  print-issued-lines: true
+  
+  # Print linter name in the end of issue text
+  print-linter-name: true
+
+# All available settings of specific linters
+linters-settings:
+  errcheck:
+    # Report about not checking of errors in type assertions
+    check-type-assertions: true
+    # Report about assignment of errors to blank identifier
+    check-blank: true
+    
+  govet:
+    # Report about shadowed variables
+    enable-all: true
+    
+  gocyclo:
+    # Minimal code complexity to report
+    min-complexity: 15
+    
+  maligned:
+    # Print struct with more effective memory layout
+    suggest-new: true
+    
+  dupl:
+    # Tokens count to trigger issue
+    threshold: 100
+    
+  goconst:
+    # Minimal length of string constant
+    min-len: 3
+    # Minimal occurrences count to trigger
+    min-occurrences: 3
+    
+  misspell:
+    # Locale to use
+    locale: US
+    
+  lll:
+    # Max line length
+    line-length: 120
+    
+  goimports:
+    # Put imports beginning with prefix after 3rd-party packages
+    local-prefixes: github.com/nickqweaver/weave-queue
+    
+  gocritic:
+    # Which checks should be enabled
+    enabled-checks:
+      - rangeValCopy
+      - captLocal
+
+linters:
+  enable:
+    - bodyclose      # Checks whether HTTP response body is closed
+    - deadcode       # Finds unused code
+    - depguard       # Go linter that checks if package imports are in a list of acceptable packages
+    - dogsled        # Checks assignments with too many blank identifiers
+    - dupl           # Tool for code clone detection
+    - errcheck       # Checks for unchecked errors
+    - gochecknoinits # Checks that no init functions are present in Go code
+    - goconst        # Finds repeated strings that could be replaced by a constant
+    - gocritic       # Provides diagnostics that check for bugs, performance and style issues
+    - gocyclo        # Computes and checks the cyclomatic complexity of functions
+    - gofmt          # Checks if code is formatted with gofmt
+    - goimports      # Checks import formatting
+    - golint         # Prints out coding style mistakes
+    - gomnd          # An analyzer to detect magic numbers
+    - goprintffuncname # Checks that printf-like functions are named with f at the end
+    - gosec          # Inspects source code for security problems
+    - gosimple       # Linter for Go source code that specializes in simplifying code
+    - govet          # Reports suspicious constructs
+    - ineffassign    # Detects when assignments to existing variables are not used
+    - interfacer     # Linter that suggests narrower interface types
+    - lll            # Reports long lines
+    - misspell       # Finds commonly misspelled English words
+    - nakedret       # Finds naked returns in functions greater than a specified function length
+    - rowserrcheck   # Checks whether Rows.Err of rows is checked successfully
+    - scopelint      # Checks for unpinned variables in go programs
+    - staticcheck    # Go static analysis
+    - structcheck    # Finds unused struct fields
+    - stylecheck     # Stylecheck is a replacement for golint
+    - typecheck      # Like the front-end of a Go compiler, parses and type-checks Go code
+    - unconvert      # Removes unnecessary type conversions
+    - unparam        # Reports unused function parameters
+    - unused         # Checks Go code for unused constants, variables, functions and types
+    - varcheck       # Finds unused global variables and constants
+    - whitespace     # Trailing whitespace detection
+
+  disable:
+    - maligned  # Replaced by fieldalignment, too strict for now
+    - prealloc  # Can be noisy for slices that grow dynamically
+
+  # Run only fast linters from enabled set
+  fast: false
+
+issues:
+  # Excluding configuration per-path, per-linter, per-text and per-source
+  exclude-rules:
+    # Exclude some linters from running on tests files
+    - path: _test\.go
+      linters:
+        - gocyclo
+        - errcheck
+        - dupl
+        - gosec
+        - lll
+
+    # Exclude known linter issues
+    - text: "weak cryptographic primitive"
+      linters:
+        - gosec
+
+  # Show all issues from one linter
+  max-issues-per-linter: 0
+  
+  # Show all issues with the same text
+  max-same-issues: 0
+  
+  # Make issues output unique by line
+  uniq-by-line: true
