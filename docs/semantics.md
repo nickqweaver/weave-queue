@@ -154,3 +154,86 @@ All state transitions from InFlight require a valid lease token:
 ### Network Partition
 - Leases may expire and cause duplicate processing
 - At-least-once delivery is still maintained
+
+## Retry and Backoff Semantics
+
+### Retry Policy
+
+**Retry Cap**: Jobs are retried at most `MaxRetries` times (default: 3)
+- Initial attempt + 3 retries = 4 total attempts maximum
+- When retries are exhausted, job transitions to `Failed` state
+- Failed jobs require manual intervention or dead-letter handling
+
+**Backoff Calculation**: Exponential backoff with full jitter
+```
+delay = random(0, min(base * 2^attempt, max))
+```
+
+Default values:
+- Base delay: 500ms
+- Maximum delay: 30s
+- Jitter: Full decorrelated jitter to prevent thundering herds
+
+**Retry Visibility**: After a nack
+1. Retry count is incremented
+2. `retry_at` is set to `now + calculated_delay`
+3. Job returns to `Ready` state
+4. Job is not claimable until `retry_at` time has passed
+
+See [Retry Policy](./retry-policy.md) for complete details.
+
+## Lease Semantics
+
+### Lease Basics
+
+A lease represents temporary exclusive ownership of a job by a worker:
+- **Lease Token**: Unique identifier assigned at claim time
+- **Lease Version**: Monotonically increasing on each claim
+- **Lease Expiry**: `LeaseExpiresAt` timestamp after which lease is invalid
+
+### Lease Duration (TTL)
+
+- **LeaseTTL**: Duration from claim until lease expires (default: 5s)
+- **Purpose**: Prevents stuck jobs when workers crash or disconnect
+- **Trade-off**: Shorter TTL = faster recovery, more lease refresh overhead
+
+### Lease Fencing
+
+All updates to InFlight jobs require valid lease token:
+- Ack/Nack must include matching lease token
+- Stale tokens are rejected with `ErrStaleLease`
+- Prevents delayed commits from corrupting newer claims
+
+### Lease Extension (Heartbeat)
+
+For long-running jobs, workers can extend leases:
+- **Heartbeat Interval**: Typically LeaseTTL / 3 (e.g., 1.67s for 5s TTL)
+- **Extension**: Each heartbeat extends `LeaseExpiresAt` by LeaseTTL
+- **Stop Condition**: Heartbeat stops when job completes or context cancels
+
+### Lease Expiry and Reclaim
+
+When a lease expires:
+1. Job remains in `InFlight` state in store
+2. Store makes job available to new claims
+3. New claim assigns new lease token (version incremented)
+4. Old worker's commits are rejected (stale token)
+5. Job may be processed by multiple workers (at-least-once guarantee)
+
+### Separation of Concerns
+
+**Lease TTL** vs **Execution Timeout**:
+- Lease TTL: Storage-layer protection against stuck jobs
+- Execution Timeout: Application-layer limit on handler runtime
+- These are separate values to support long-running work with short leases
+
+Example:
+```
+LeaseTTL: 30s          // Extendable via heartbeat
+ExecutionTimeout: 5m   // Hard limit on handler runtime
+```
+
+This allows:
+- 5-minute jobs that heartbeat every 10s
+- Automatic reclaim if heartbeats stop (worker crash)
+- Hard termination if handler runs longer than 5m
