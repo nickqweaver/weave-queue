@@ -107,13 +107,19 @@ func (s *Server) Run() {
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
+	s.RunWithContext(ctx)
+}
+
+// RunWithContext runs the server with a caller-provided context.
+// This allows the caller to control shutdown via context cancellation.
+func (s *Server) RunWithContext(ctx context.Context) {
 	s.mu.Lock()
 	if s.cancel != nil {
 		s.mu.Unlock()
 		return
 	}
 	s.done = make(chan struct{})
-	s.cancel = stop
+	s.cancel = func() {}
 	done := s.done
 	s.mu.Unlock()
 
