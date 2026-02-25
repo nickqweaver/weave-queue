@@ -1,0 +1,93 @@
+name: CI
+
+on:
+  push:
+    branches: [ main, master, feat/*, fix/* ]
+  pull_request:
+    branches: [ main, master ]
+
+jobs:
+  test:
+    name: Test
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        go-version: ['1.21', '1.22', '1.23']
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Set up Go
+      uses: actions/setup-go@v5
+      with:
+        go-version: ${{ matrix.go-version }}
+
+    - name: Cache Go modules
+      uses: actions/cache@v4
+      with:
+        path: ~/go/pkg/mod
+        key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}
+        restore-keys: |
+          ${{ runner.os }}-go-
+
+    - name: Download dependencies
+      run: go mod download
+
+    - name: Run tests
+      run: go test -v -race -count=1 ./...
+      timeout-minutes: 10
+
+    - name: Run go vet
+      run: go vet ./...
+
+  build:
+    name: Build
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Set up Go
+      uses: actions/setup-go@v5
+      with:
+        go-version: '1.23'
+
+    - name: Build all packages
+      run: go build ./...
+
+    - name: Build examples
+      run: go build ./examples/...
+
+  check:
+    name: Quality Checks
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Set up Go
+      uses: actions/setup-go@v5
+      with:
+        go-version: '1.23'
+
+    - name: Check formatting
+      run: |
+        if [ -n "$(gofmt -l .)" ]; then
+          echo "The following files need formatting:"
+          gofmt -l .
+          exit 1
+        fi
+
+    - name: Check go mod tidy
+      run: |
+        go mod tidy
+        if [ -n "$(git diff --name-only go.mod go.sum)" ]; then
+          echo "go.mod or go.sum is not tidy"
+          git diff go.mod go.sum
+          exit 1
+        fi
+
+    - name: Check build without external dependencies
+      run: |
+        # Ensure we can build without CGO (for static binaries)
+        CGO_ENABLED=0 go build ./cmd/...
