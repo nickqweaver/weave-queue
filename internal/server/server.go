@@ -48,19 +48,15 @@ type Server struct {
 }
 
 type Config struct {
-	BatchSize          int
-	MaxQueue           int
-	MaxConcurrency     int
-	MaxRetries         int
-	MaxColdTimeout     int
-	LeaseTTL           time.Duration
-	RetryFetchRatio    float64
-	RetryBackoffBaseMS int
-	RetryBackoffMaxMS  int
-	ClaimOptions       store.ClaimOptions
+	BatchSize      int
+	MaxQueue       int
+	MaxConcurrency int
+	MaxColdTimeout int
+	ClaimOptions   *store.ClaimOptions
 }
 
-func NewServer(s store.Store, c Config) Server {
+func NewServer(s store.Store, config Config) Server {
+	c := config.ClaimOptions
 	leaseTTL := c.LeaseTTL
 	if leaseTTL <= 0 {
 		leaseTTL = defaultLeaseTTL
@@ -84,28 +80,20 @@ func NewServer(s store.Store, c Config) Server {
 		retryBackoffMaxMS = utils.DefaultRetryBackoffMaxMS
 	}
 
-	pending := make(chan Req, c.MaxQueue)
-	finished := make(chan Res, c.BatchSize)
+	pending := make(chan Req, config.MaxQueue)
+	finished := make(chan Res, config.BatchSize)
 	heartbeat := make(chan HeartBeat)
 
-	consumer := NewConsumer(&c, pending, finished, heartbeat)
+	consumer := NewConsumer(&config, pending, finished, heartbeat)
 	committer := NewCommitter(
+		&config,
 		s,
 		finished,
-		c.MaxRetries,
-		retryBackoffBaseMS,
-		retryBackoffMaxMS,
 		heartbeat,
 	)
 	fetcher := NewFetcher(
+		&config,
 		pending,
-		c.BatchSize,
-		c.MaxRetries,
-		c.MaxColdTimeout,
-		leaseTTL,
-		retryFetchRatio,
-		retryBackoffBaseMS,
-		retryBackoffMaxMS,
 	)
 	server := Server{store: s, consumer: consumer, fetcher: fetcher, committer: committer}
 

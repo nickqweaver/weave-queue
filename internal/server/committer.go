@@ -16,23 +16,24 @@ type Committer struct {
 	maxRetries         int
 	retryBackoffBaseMS int
 	retryBackoffMaxMS  int
+	leaseTTL           time.Duration
 }
 
 func NewCommitter(
+	opts *Config,
 	s store.Store,
 	res chan Res,
-	maxRetries int,
-	retryBackoffBaseMS int,
-	retryBackoffMaxMS int,
 	heartbeat chan HeartBeat,
 ) *Committer {
+	cOpts := opts.ClaimOptions
 	return &Committer{
 		store:              s,
 		res:                res,
 		heartbeat:          heartbeat,
-		maxRetries:         max(0, maxRetries),
-		retryBackoffBaseMS: retryBackoffBaseMS,
-		retryBackoffMaxMS:  retryBackoffMaxMS,
+		maxRetries:         max(0, cOpts.MaxRetries),
+		retryBackoffBaseMS: cOpts.RetryBackoffBaseMS,
+		retryBackoffMaxMS:  cOpts.RetryBackoffMaxMS,
+		leaseTTL:           cOpts.LeaseTTL,
 	}
 }
 

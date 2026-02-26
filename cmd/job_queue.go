@@ -30,17 +30,21 @@ func addJobs(n int, p store.Store) {
 func main() {
 	mem := memory.NewMemoryStore()
 
-	server := server.NewServer(mem, server.Config{
-		MaxColdTimeout:     5000,
-		BatchSize:          100,
-		MaxQueue:           1000,
-		MaxConcurrency:     4,
+	claimOpts := store.ClaimOptions{
 		MaxRetries:         3,
 		LeaseTTL:           5 * time.Second,
 		RetryFetchRatio:    0.20,
 		RetryBackoffBaseMS: 500,
 		RetryBackoffMaxMS:  30_000,
+	}
+	server := server.NewServer(mem, server.Config{
+		MaxColdTimeout: 5000,
+		BatchSize:      100,
+		MaxQueue:       1000,
+		MaxConcurrency: 4,
+		ClaimOptions:   &claimOpts,
 	})
+
 	client := client.NewClient(mem)
 	for id := 1; id <= 10000; id++ {
 		if err := client.Enqueue("my_queue", strconv.Itoa(id)); err != nil {
