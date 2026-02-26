@@ -14,7 +14,8 @@ func TestConsumerRun_DrainsRequestsAndClosesResponseChannel(t *testing.T) {
 
 	req := make(chan Req, totalJobs)
 	res := make(chan Res, totalJobs)
-	c := NewConsumer(3, req, res)
+	heartbeat := make(chan HeartBeat, totalJobs)
+	c := NewConsumer(newConsumerConfig(3), req, res, heartbeat)
 
 	now := time.Now().UTC()
 	for i := 1; i <= totalJobs; i++ {
@@ -56,7 +57,8 @@ func TestConsumerRun_NoDroppedOrDuplicateResponses(t *testing.T) {
 
 	req := make(chan Req, totalJobs)
 	res := make(chan Res, totalJobs)
-	c := NewConsumer(concurrency, req, res)
+	heartbeat := make(chan HeartBeat, totalJobs)
+	c := NewConsumer(newConsumerConfig(concurrency), req, res, heartbeat)
 
 	now := time.Now().UTC()
 	for i := 1; i <= totalJobs; i++ {
@@ -99,7 +101,16 @@ func leasedJob(id string, leasedAt time.Time) store.Job {
 		ID:             id,
 		Queue:          "my_queue",
 		Status:         store.InFlight,
-		Timeout:        60000,
+		Timeout:        500 * time.Millisecond,
 		LeaseExpiresAt: &lease,
+	}
+}
+
+func newConsumerConfig(concurrency int) *Config {
+	return &Config{
+		MaxConcurrency: concurrency,
+		ClaimOptions: &store.ClaimOptions{
+			LeaseTTL: time.Hour,
+		},
 	}
 }

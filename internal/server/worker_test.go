@@ -16,7 +16,8 @@ func TestWorkerRun_TenJobs_OneTimeout(t *testing.T) {
 
 	req := make(chan Req, totalJobs)
 	res := make(chan Res, totalJobs)
-	w := NewWorker(1, req, res)
+	heartbeat := make(chan HeartBeat, totalJobs)
+	w := newTestWorker(1, req, res, heartbeat)
 
 	jobs, timedOutID := jobsWithOneExpiredLease(totalJobs, 4)
 	for _, job := range jobs {
@@ -71,16 +72,17 @@ func TestWorkerRun_JobWithoutLeaseIsNacked(t *testing.T) {
 
 	req := make(chan Req, totalJobs)
 	res := make(chan Res, totalJobs)
-	w := NewWorker(1, req, res)
+	heartbeat := make(chan HeartBeat, totalJobs)
+	w := newTestWorker(1, req, res, heartbeat)
 
 	now := time.Now().UTC()
 	leaseExpiresAt := now.Add(5 * time.Second)
 	missingLeaseID := "7"
 
 	jobs := []store.Job{
-		{ID: "1", Queue: "my_queue", Status: store.InFlight, Timeout: 5000, LeaseExpiresAt: &leaseExpiresAt},
-		{ID: missingLeaseID, Queue: "my_queue", Status: store.InFlight, Timeout: 5000, LeaseExpiresAt: nil},
-		{ID: "3", Queue: "my_queue", Status: store.InFlight, Timeout: 5000, LeaseExpiresAt: &leaseExpiresAt},
+		{ID: "1", Queue: "my_queue", Status: store.InFlight, Timeout: 500 * time.Millisecond, LeaseExpiresAt: &leaseExpiresAt},
+		{ID: missingLeaseID, Queue: "my_queue", Status: store.InFlight, Timeout: 500 * time.Millisecond, LeaseExpiresAt: nil},
+		{ID: "3", Queue: "my_queue", Status: store.InFlight, Timeout: 500 * time.Millisecond, LeaseExpiresAt: &leaseExpiresAt},
 	}
 
 	for _, job := range jobs {
@@ -136,8 +138,9 @@ func TestWorkerAndCommitter_TenJobs_OneTimeoutMarksFailed(t *testing.T) {
 	mem := memory.NewMemoryStore()
 	req := make(chan Req, totalJobs)
 	res := make(chan Res, totalJobs)
-	w := NewWorker(1, req, res)
-	committer := NewCommitter(mem, res, 3, 500, 30_000)
+	heartbeat := make(chan HeartBeat, totalJobs)
+	w := newTestWorker(1, req, res, heartbeat)
+	committer := NewCommitter(newCommitterConfig(3), mem, res, heartbeat)
 
 	jobs, timedOutID := jobsWithOneExpiredLease(totalJobs, 6)
 	for _, job := range jobs {
@@ -151,7 +154,10 @@ func TestWorkerAndCommitter_TenJobs_OneTimeoutMarksFailed(t *testing.T) {
 	beforeCommit := time.Now().UTC()
 	w.Run(context.Background())
 	close(res)
-	committer.run()
+	close(heartbeat)
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	committer.run(ctx)
 
 	allJobs := mem.GetAllJobs()
 	if len(allJobs) != totalJobs {
@@ -208,11 +214,11 @@ func jobsWithOneExpiredLease(total int, expiredIndex int) ([]store.Job, string) 
 	for i := 0; i < total; i++ {
 		id := strconv.Itoa((i * 2) + 1)
 		leaseExpiresAt := now.Add(5 * time.Second)
-		timeout := 5000
+		timeout := 500 * time.Millisecond
 
 		if i == expiredIndex {
 			leaseExpiresAt = now.Add(-2 * time.Second)
-			timeout = 1
+			timeout = time.Nanosecond
 			timedOutID = id
 		}
 
@@ -227,4 +233,14 @@ func jobsWithOneExpiredLease(total int, expiredIndex int) ([]store.Job, string) 
 	}
 
 	return jobs, timedOutID
+}
+
+func newTestWorker(id int, req chan Req, res chan Res, heartbeat chan HeartBeat) Worker {
+	return Worker{
+		ID:        id,
+		req:       req,
+		res:       res,
+		heartbeat: heartbeat,
+		beatEvery: time.Hour,
+	}
 }

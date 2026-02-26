@@ -6,21 +6,22 @@ import (
 
 	"github.com/nickqweaver/weave-queue/internal/store"
 	memory "github.com/nickqweaver/weave-queue/internal/store/adapters/memory"
-	"github.com/nickqweaver/weave-queue/internal/utils"
 )
 
 func TestNewServer_WiresComponentsAndChannelCapacities(t *testing.T) {
 	mem := memory.NewMemoryStore()
 	cfg := Config{
-		BatchSize:          7,
-		MaxQueue:           11,
-		MaxConcurrency:     3,
-		MaxRetries:         5,
-		MaxColdTimeout:     9000,
-		LeaseTTL:           5 * time.Second,
-		RetryFetchRatio:    0.35,
-		RetryBackoffBaseMS: 700,
-		RetryBackoffMaxMS:  40_000,
+		BatchSize:      7,
+		MaxQueue:       11,
+		MaxConcurrency: 3,
+		MaxColdTimeout: 9000,
+		ClaimOptions: &store.ClaimOptions{
+			MaxRetries:         5,
+			LeaseTTL:           5 * time.Second,
+			RetryFetchRatio:    0.35,
+			RetryBackoffBaseMS: 700,
+			RetryBackoffMaxMS:  40_000,
+		},
 	}
 
 	s := NewServer(mem, cfg)
@@ -38,23 +39,23 @@ func TestNewServer_WiresComponentsAndChannelCapacities(t *testing.T) {
 	if s.fetcher.BatchSize != cfg.BatchSize {
 		t.Fatalf("expected fetcher batch size %d, got %d", cfg.BatchSize, s.fetcher.BatchSize)
 	}
-	if s.fetcher.MaxRetries != cfg.MaxRetries {
-		t.Fatalf("expected fetcher max retries %d, got %d", cfg.MaxRetries, s.fetcher.MaxRetries)
+	if s.fetcher.MaxRetries != cfg.ClaimOptions.MaxRetries {
+		t.Fatalf("expected fetcher max retries %d, got %d", cfg.ClaimOptions.MaxRetries, s.fetcher.MaxRetries)
 	}
 	if s.fetcher.MaxColdTimeout != cfg.MaxColdTimeout {
 		t.Fatalf("expected fetcher cold timeout %d, got %d", cfg.MaxColdTimeout, s.fetcher.MaxColdTimeout)
 	}
-	if s.fetcher.LeaseTTL != cfg.LeaseTTL {
-		t.Fatalf("expected fetcher lease ttl %v, got %v", cfg.LeaseTTL, s.fetcher.LeaseTTL)
+	if s.fetcher.LeaseTTL != cfg.ClaimOptions.LeaseTTL {
+		t.Fatalf("expected fetcher lease ttl %v, got %v", cfg.ClaimOptions.LeaseTTL, s.fetcher.LeaseTTL)
 	}
-	if s.fetcher.RetryFetchRatio != cfg.RetryFetchRatio {
-		t.Fatalf("expected fetcher retry fetch ratio %.2f, got %.2f", cfg.RetryFetchRatio, s.fetcher.RetryFetchRatio)
+	if s.fetcher.RetryFetchRatio != cfg.ClaimOptions.RetryFetchRatio {
+		t.Fatalf("expected fetcher retry fetch ratio %.2f, got %.2f", cfg.ClaimOptions.RetryFetchRatio, s.fetcher.RetryFetchRatio)
 	}
-	if s.fetcher.RetryBackoffBaseMS != cfg.RetryBackoffBaseMS {
-		t.Fatalf("expected fetcher retry backoff base %d, got %d", cfg.RetryBackoffBaseMS, s.fetcher.RetryBackoffBaseMS)
+	if s.fetcher.RetryBackoffBaseMS != cfg.ClaimOptions.RetryBackoffBaseMS {
+		t.Fatalf("expected fetcher retry backoff base %d, got %d", cfg.ClaimOptions.RetryBackoffBaseMS, s.fetcher.RetryBackoffBaseMS)
 	}
-	if s.fetcher.RetryBackoffMaxMS != cfg.RetryBackoffMaxMS {
-		t.Fatalf("expected fetcher retry backoff max %d, got %d", cfg.RetryBackoffMaxMS, s.fetcher.RetryBackoffMaxMS)
+	if s.fetcher.RetryBackoffMaxMS != cfg.ClaimOptions.RetryBackoffMaxMS {
+		t.Fatalf("expected fetcher retry backoff max %d, got %d", cfg.ClaimOptions.RetryBackoffMaxMS, s.fetcher.RetryBackoffMaxMS)
 	}
 	if s.consumer.concurrency != cfg.MaxConcurrency {
 		t.Fatalf("expected consumer concurrency %d, got %d", cfg.MaxConcurrency, s.consumer.concurrency)
@@ -92,15 +93,17 @@ func TestNewServer_WiresComponentsAndChannelCapacities(t *testing.T) {
 func TestServerClose_ShutsDownRunAndIsIdempotent(t *testing.T) {
 	mem := memory.NewMemoryStore()
 	cfg := Config{
-		BatchSize:          4,
-		MaxQueue:           8,
-		MaxConcurrency:     2,
-		MaxRetries:         3,
-		MaxColdTimeout:     500,
-		LeaseTTL:           5 * time.Second,
-		RetryFetchRatio:    0.20,
-		RetryBackoffBaseMS: 500,
-		RetryBackoffMaxMS:  30_000,
+		BatchSize:      4,
+		MaxQueue:       8,
+		MaxConcurrency: 2,
+		MaxColdTimeout: 500,
+		ClaimOptions: &store.ClaimOptions{
+			MaxRetries:         3,
+			LeaseTTL:           5 * time.Second,
+			RetryFetchRatio:    0.20,
+			RetryBackoffBaseMS: 500,
+			RetryBackoffMaxMS:  30_000,
+		},
 	}
 
 	s := NewServer(mem, cfg)
@@ -133,39 +136,42 @@ func TestServerClose_ShutsDownRunAndIsIdempotent(t *testing.T) {
 	}
 }
 
-func TestNewServer_DefaultsBackoffValuesWithoutClampingToBase(t *testing.T) {
+func TestNewServer_PreservesClaimOptionsWithoutClampingToBase(t *testing.T) {
 	mem := memory.NewMemoryStore()
 
 	s := NewServer(mem, Config{
 		BatchSize:      4,
 		MaxQueue:       8,
 		MaxConcurrency: 2,
+		ClaimOptions:   &store.ClaimOptions{},
 	})
 
-	if s.fetcher.RetryFetchRatio != defaultRetryFetchRatio {
-		t.Fatalf("expected default retry fetch ratio %.2f, got %.2f", defaultRetryFetchRatio, s.fetcher.RetryFetchRatio)
+	if s.fetcher.RetryFetchRatio != 0 {
+		t.Fatalf("expected retry fetch ratio %.2f, got %.2f", 0.0, s.fetcher.RetryFetchRatio)
 	}
 
-	if s.fetcher.RetryBackoffBaseMS != utils.DefaultRetryBackoffBaseMS {
-		t.Fatalf("expected default retry backoff base %d, got %d", utils.DefaultRetryBackoffBaseMS, s.fetcher.RetryBackoffBaseMS)
+	if s.fetcher.RetryBackoffBaseMS != 0 {
+		t.Fatalf("expected retry backoff base %d, got %d", 0, s.fetcher.RetryBackoffBaseMS)
 	}
-	if s.fetcher.RetryBackoffMaxMS != utils.DefaultRetryBackoffMaxMS {
-		t.Fatalf("expected default retry backoff max %d, got %d", utils.DefaultRetryBackoffMaxMS, s.fetcher.RetryBackoffMaxMS)
+	if s.fetcher.RetryBackoffMaxMS != 0 {
+		t.Fatalf("expected retry backoff max %d, got %d", 0, s.fetcher.RetryBackoffMaxMS)
 	}
-	if s.committer.retryBackoffBaseMS != utils.DefaultRetryBackoffBaseMS {
-		t.Fatalf("expected committer default retry backoff base %d, got %d", utils.DefaultRetryBackoffBaseMS, s.committer.retryBackoffBaseMS)
+	if s.committer.retryBackoffBaseMS != 0 {
+		t.Fatalf("expected committer retry backoff base %d, got %d", 0, s.committer.retryBackoffBaseMS)
 	}
-	if s.committer.retryBackoffMaxMS != utils.DefaultRetryBackoffMaxMS {
-		t.Fatalf("expected committer default retry backoff max %d, got %d", utils.DefaultRetryBackoffMaxMS, s.committer.retryBackoffMaxMS)
+	if s.committer.retryBackoffMaxMS != 0 {
+		t.Fatalf("expected committer retry backoff max %d, got %d", 0, s.committer.retryBackoffMaxMS)
 	}
 
 	s = NewServer(mem, Config{
-		BatchSize:          4,
-		MaxQueue:           8,
-		MaxConcurrency:     2,
-		RetryFetchRatio:    0.60,
-		RetryBackoffBaseMS: 5000,
-		RetryBackoffMaxMS:  1000,
+		BatchSize:      4,
+		MaxQueue:       8,
+		MaxConcurrency: 2,
+		ClaimOptions: &store.ClaimOptions{
+			RetryFetchRatio:    0.60,
+			RetryBackoffBaseMS: 5000,
+			RetryBackoffMaxMS:  1000,
+		},
 	})
 
 	if s.fetcher.RetryFetchRatio != 0.60 {

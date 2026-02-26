@@ -1,6 +1,7 @@
 package server
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"sync"
@@ -12,7 +13,7 @@ import (
 
 func TestCommitterBatchWrite_MapsAckAndNackStatuses(t *testing.T) {
 	s := newCommitterStoreStub("job-1", "job-2")
-	c := NewCommitter(s, make(chan Res, 1), 3, 500, 30_000)
+	c := NewCommitter(newCommitterConfig(3), s, make(chan Res, 1), make(chan HeartBeat, 1))
 	before := time.Now().UTC()
 
 	c.batchWrite([]Res{
@@ -52,14 +53,18 @@ func TestCommitterBatchWrite_MapsAckAndNackStatuses(t *testing.T) {
 func TestCommitterRun_FlushesFinalPartialBatchOnClose(t *testing.T) {
 	s := newCommitterStoreStub("1", "2", "3")
 	res := make(chan Res, 4)
-	c := NewCommitter(s, res, 3, 500, 30_000)
+	heartbeat := make(chan HeartBeat, 1)
+	c := NewCommitter(newCommitterConfig(3), s, res, heartbeat)
 
 	res <- Res{ID: "1", Status: Ack, Job: store.Job{ID: "1", Retries: 0}}
 	res <- Res{ID: "2", Status: Ack, Job: store.Job{ID: "2", Retries: 0}}
 	res <- Res{ID: "3", Status: NAck, Job: store.Job{ID: "3", Retries: 1}}
 	close(res)
+	close(heartbeat)
 
-	c.run()
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	c.run(ctx)
 
 	if s.updateCount() != 3 {
 		t.Fatalf("expected 3 update calls, got %d", s.updateCount())
@@ -88,7 +93,7 @@ func TestCommitterRun_FlushesFinalPartialBatchOnClose(t *testing.T) {
 func TestCommitterBatchWrite_ContinuesAfterUpdateError(t *testing.T) {
 	s := newCommitterStoreStub("1", "3")
 	s.setFailure("2", errors.New("forced update error"))
-	c := NewCommitter(s, make(chan Res, 1), 3, 500, 30_000)
+	c := NewCommitter(newCommitterConfig(3), s, make(chan Res, 1), make(chan HeartBeat, 1))
 
 	c.batchWrite([]Res{
 		{ID: "1", Status: Ack, Job: store.Job{ID: "1", Retries: 0}},
@@ -122,7 +127,7 @@ func TestCommitterBatchWrite_StopsRetryingAtMaxRetries(t *testing.T) {
 		t.Fatalf("failed seeding job: %v", err)
 	}
 
-	c := NewCommitter(s, make(chan Res, 1), maxRetries, 500, 30_000)
+	c := NewCommitter(newCommitterConfig(maxRetries), s, make(chan Res, 1), make(chan HeartBeat, 1))
 	c.batchWrite([]Res{
 		{ID: "job-1", Status: NAck, Job: seed},
 	})
@@ -158,6 +163,17 @@ func newCommitterStoreStub(ids ...string) *committerStoreStub {
 	return &committerStoreStub{
 		jobs:    jobs,
 		failIDs: make(map[string]error),
+	}
+}
+
+func newCommitterConfig(maxRetries int) *Config {
+	return &Config{
+		ClaimOptions: &store.ClaimOptions{
+			MaxRetries:         maxRetries,
+			LeaseTTL:           15 * time.Second,
+			RetryBackoffBaseMS: 500,
+			RetryBackoffMaxMS:  30_000,
+		},
 	}
 }
 
