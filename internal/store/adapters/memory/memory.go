@@ -141,6 +141,9 @@ func (n *MemoryStore) UpdateJob(id string, update store.JobUpdate) error {
 				n.jobs[i].Retries = *update.Retries
 			}
 			n.jobs[i].RetryAt = update.RetryAt
+			if update.LeaseExpiresAt != nil {
+				n.jobs[i].LeaseExpiresAt = update.LeaseExpiresAt
+			}
 			return nil
 		}
 	}

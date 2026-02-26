@@ -32,7 +32,7 @@ func main() {
 
 	claimOpts := store.ClaimOptions{
 		MaxRetries:         3,
-		LeaseTTL:           5 * time.Second,
+		LeaseTTL:           15 * time.Second,
 		RetryFetchRatio:    0.20,
 		RetryBackoffBaseMS: 500,
 		RetryBackoffMaxMS:  30_000,

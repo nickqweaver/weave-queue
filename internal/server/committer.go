@@ -110,11 +110,12 @@ func (c *Committer) run(ctx context.Context) {
 				activeHeartbeat = nil
 				continue
 			}
+			fmt.Println("RENEWED LEASE ********************************************************")
 
-			ttl := defaultLeaseTTL // this should be from config
+			ttl := c.leaseTTL
 			now := time.Now().UTC()
 			leaseExpiresAt := now.Add(ttl)
-			jobID := fmt.Sprintf("%d", hb.jobId)
+			jobID := hb.Job
 			if err := c.store.UpdateJob(
 				jobID,
 				store.JobUpdate{Status: store.InFlight, LeaseExpiresAt: &leaseExpiresAt},

@@ -30,10 +30,11 @@ type Job struct {
 	ID             string
 	Queue          string
 	Status         Status
-	Timeout        int
+	Timeout        time.Duration
 	LeaseExpiresAt *time.Time
 	RetryAt        *time.Time
 	Retries        int
+	Task           string // This is the Task Key ("email.send.v1"), which is used to lookup the handler from the Task Registry
 }
 
 type JobUpdate struct {

@@ -2,6 +2,7 @@ package client
 
 import (
 	"errors"
+	"time"
 
 	"github.com/nickqweaver/weave-queue/internal/store"
 )
@@ -19,7 +20,7 @@ func (p Producer) Enqueue(queue string, id string) error {
 	}
 
 	// Create Job in Database with data
-	job := store.Job{ID: id, Status: store.Ready, Queue: queue, Timeout: 5000}
+	job := store.Job{ID: id, Status: store.Ready, Queue: queue, Timeout: time.Minute * 15}
 	return p.store.AddJob(job)
 }
 

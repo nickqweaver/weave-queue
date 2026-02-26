@@ -5,22 +5,17 @@ import (
 	"errors"
 	"fmt"
 	"strconv"
+	"time"
 
 	"github.com/nickqweaver/weave-queue/internal/store"
 )
 
 type Worker struct {
-	req <-chan Req
-	res chan<- Res
-	ID  int
-}
-
-func NewWorker(id int, req <-chan Req, res chan<- Res) *Worker {
-	return &Worker{
-		ID:  id,
-		res: res,
-		req: req,
-	}
+	req       <-chan Req
+	res       chan<- Res
+	ID        int
+	heartbeat chan HeartBeat
+	beatEvery time.Duration
 }
 
 func doWork(ctx context.Context, job store.Job) (bool, error) {
@@ -61,9 +56,34 @@ func (w *Worker) Run(ctx context.Context) {
 
 			w.res <- response
 		} else {
-			deadline := *j.LeaseExpiresAt
+			jobCtx, cancel := context.WithTimeout(ctx, j.Timeout)
+			hbDone := make(chan struct{})
+
+			// Spawn a new goroutine to run the ticker, make sure we kill the goroutine if ctx/heartbeat is done
+			// This seems repetive/redundant I bet there is a better way look at refactor later
+			go func(jobID string) {
+				ticker := time.NewTicker(w.beatEvery)
+				defer ticker.Stop()
+
+				for {
+					select {
+					case <-jobCtx.Done():
+						return
+					case <-hbDone:
+						return
+					case <-ticker.C:
+						select {
+						case w.heartbeat <- HeartBeat{Worker: w.ID, Job: j.ID}:
+						case <-jobCtx.Done():
+							return
+						case <-hbDone:
+							return
+						}
+					}
+				}
+			}(j.ID)
+
 			// Handler placeholder, should return ok, err then we can ack/nack based on that
-			jobCtx, cancel := context.WithDeadline(ctx, deadline)
 			if _, err := doWork(jobCtx, j); err != nil {
 				response := Res{
 					Status:  NAck,
