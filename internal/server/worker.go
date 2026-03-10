@@ -20,6 +20,7 @@ type Worker struct {
 
 func doWork(ctx context.Context, job store.Job) (bool, error) {
 	result := 0
+
 	for i := range 5_000 {
 		select {
 		case <-ctx.Done():
@@ -73,7 +74,7 @@ func (w *Worker) Run(ctx context.Context) {
 						return
 					case <-ticker.C:
 						select {
-						case w.heartbeat <- HeartBeat{Worker: w.ID, Job: j.ID}:
+						case w.heartbeat <- HeartBeat{Worker: w.ID, Job: jobID}:
 						case <-jobCtx.Done():
 							return
 						case <-hbDone:
@@ -85,6 +86,8 @@ func (w *Worker) Run(ctx context.Context) {
 
 			// Handler placeholder, should return ok, err then we can ack/nack based on that
 			if _, err := doWork(jobCtx, j); err != nil {
+				close(hbDone)
+				cancel()
 				response := Res{
 					Status:  NAck,
 					Message: err.Error(),
@@ -95,6 +98,8 @@ func (w *Worker) Run(ctx context.Context) {
 
 				w.res <- response
 			} else {
+				close(hbDone)
+				cancel()
 				response := Res{
 					Status:  Ack,
 					Message: fmt.Sprintf("Successfully completed Job %s", j.ID),
@@ -104,7 +109,7 @@ func (w *Worker) Run(ctx context.Context) {
 				}
 				w.res <- response
 			}
-			cancel()
+
 		}
 
 	}
