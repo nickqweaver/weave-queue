@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os/signal"
 	"sync"
@@ -85,8 +86,11 @@ type runtimeConfig struct {
 	committer CommitterConfig
 }
 
-func NewServer(s store.Store, config Config) Server {
-	rc := normalizeConfig(config)
+func NewServer(s store.Store, config Config) (Server, error) {
+	rc, err := normalizeConfig(config)
+	if err != nil {
+		return Server{}, err
+	}
 
 	pending := make(chan Req, rc.maxQueue)
 	finished := make(chan Res, rc.batchSize)
@@ -105,10 +109,14 @@ func NewServer(s store.Store, config Config) Server {
 	)
 	server := Server{store: s, consumer: consumer, fetcher: fetcher, committer: committer}
 
-	return server
+	return server, nil
 }
 
-func normalizeConfig(config Config) runtimeConfig {
+func normalizeConfig(config Config) (runtimeConfig, error) {
+	if err := validateConfig(config); err != nil {
+		return runtimeConfig{}, err
+	}
+
 	claimOpts := store.ClaimOptions{}
 	if config.ClaimOptions != nil {
 		claimOpts = *config.ClaimOptions
@@ -122,9 +130,6 @@ func normalizeConfig(config Config) runtimeConfig {
 	retryFetchRatio := claimOpts.RetryFetchRatio
 	if retryFetchRatio <= 0 {
 		retryFetchRatio = defaultRetryFetchRatio
-	}
-	if retryFetchRatio > 1 {
-		retryFetchRatio = 1
 	}
 
 	retryBackoffBaseMS := claimOpts.RetryBackoffBaseMS
@@ -164,7 +169,47 @@ func normalizeConfig(config Config) runtimeConfig {
 			RetryBackoffMaxMS:  retryBackoffMaxMS,
 			LeaseTTL:           leaseTTL,
 		},
+	}, nil
+}
+
+func validateConfig(config Config) error {
+	if config.BatchSize <= 0 {
+		return errors.New("server config: BatchSize must be greater than zero")
 	}
+	if config.MaxQueue <= 0 {
+		return errors.New("server config: MaxQueue must be greater than zero")
+	}
+	if config.MaxConcurrency <= 0 {
+		return errors.New("server config: MaxConcurrency must be greater than zero")
+	}
+	if config.MaxColdTimeout <= 0 {
+		return errors.New("server config: MaxColdTimeout must be greater than zero")
+	}
+	if config.ClaimOptions == nil {
+		return nil
+	}
+
+	claimOpts := config.ClaimOptions
+	if claimOpts.MaxRetries < 0 {
+		return errors.New("server config: ClaimOptions.MaxRetries must be zero or greater")
+	}
+	if claimOpts.RetryFetchRatio < 0 || claimOpts.RetryFetchRatio > 1 {
+		return errors.New("server config: ClaimOptions.RetryFetchRatio must be between 0 and 1")
+	}
+	if claimOpts.LeaseTTL < 0 {
+		return errors.New("server config: ClaimOptions.LeaseTTL must be zero or greater")
+	}
+	if claimOpts.RetryBackoffBaseMS < 0 {
+		return errors.New("server config: ClaimOptions.RetryBackoffBaseMS must be zero or greater")
+	}
+	if claimOpts.RetryBackoffMaxMS < 0 {
+		return errors.New("server config: ClaimOptions.RetryBackoffMaxMS must be zero or greater")
+	}
+	if claimOpts.RetryBackoffBaseMS > 0 && claimOpts.RetryBackoffMaxMS > 0 && claimOpts.RetryBackoffBaseMS > claimOpts.RetryBackoffMaxMS {
+		return errors.New("server config: ClaimOptions.RetryBackoffBaseMS must be less than or equal to ClaimOptions.RetryBackoffMaxMS")
+	}
+
+	return nil
 }
 
 func (s *Server) Run() {

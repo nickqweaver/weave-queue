@@ -1,6 +1,7 @@
 package server
 
 import (
+	"strings"
 	"testing"
 	"time"
 
@@ -24,7 +25,10 @@ func TestNewServer_WiresComponentsAndChannelCapacities(t *testing.T) {
 		},
 	}
 
-	s := NewServer(mem, cfg)
+	s, err := NewServer(mem, cfg)
+	if err != nil {
+		t.Fatalf("expected server to build, got error: %v", err)
+	}
 
 	if s.fetcher == nil {
 		t.Fatal("expected fetcher to be initialized")
@@ -109,7 +113,10 @@ func TestServerClose_ShutsDownRunAndIsIdempotent(t *testing.T) {
 		},
 	}
 
-	s := NewServer(mem, cfg)
+	s, err := NewServer(mem, cfg)
+	if err != nil {
+		t.Fatalf("expected server to build, got error: %v", err)
+	}
 
 	runDone := make(chan struct{})
 	go func() {
@@ -142,12 +149,16 @@ func TestServerClose_ShutsDownRunAndIsIdempotent(t *testing.T) {
 func TestNewServer_NormalizesClaimOptionsOnce(t *testing.T) {
 	mem := memory.NewMemoryStore()
 
-	s := NewServer(mem, Config{
+	s, err := NewServer(mem, Config{
 		BatchSize:      4,
 		MaxQueue:       8,
 		MaxConcurrency: 2,
+		MaxColdTimeout: 500,
 		ClaimOptions:   &store.ClaimOptions{},
 	})
+	if err != nil {
+		t.Fatalf("expected server to build, got error: %v", err)
+	}
 
 	if s.fetcher.RetryFetchRatio != defaultRetryFetchRatio {
 		t.Fatalf("expected retry fetch ratio %.2f, got %.2f", defaultRetryFetchRatio, s.fetcher.RetryFetchRatio)
@@ -172,16 +183,20 @@ func TestNewServer_NormalizesClaimOptionsOnce(t *testing.T) {
 		t.Fatalf("expected heartbeat interval %v, got %v", defaultLeaseTTL/3, s.consumer.beatEvery)
 	}
 
-	s = NewServer(mem, Config{
+	s, err = NewServer(mem, Config{
 		BatchSize:      4,
 		MaxQueue:       8,
 		MaxConcurrency: 2,
+		MaxColdTimeout: 500,
 		ClaimOptions: &store.ClaimOptions{
 			RetryFetchRatio:    0.60,
 			RetryBackoffBaseMS: 5000,
-			RetryBackoffMaxMS:  1000,
+			RetryBackoffMaxMS:  10000,
 		},
 	})
+	if err != nil {
+		t.Fatalf("expected server to build, got error: %v", err)
+	}
 
 	if s.fetcher.RetryFetchRatio != 0.60 {
 		t.Fatalf("expected retry fetch ratio %.2f, got %.2f", 0.60, s.fetcher.RetryFetchRatio)
@@ -190,31 +205,98 @@ func TestNewServer_NormalizesClaimOptionsOnce(t *testing.T) {
 	if s.fetcher.RetryBackoffBaseMS != 5000 {
 		t.Fatalf("expected retry backoff base %d, got %d", 5000, s.fetcher.RetryBackoffBaseMS)
 	}
-	if s.fetcher.RetryBackoffMaxMS != 1000 {
-		t.Fatalf("expected retry backoff max %d, got %d", 1000, s.fetcher.RetryBackoffMaxMS)
+	if s.fetcher.RetryBackoffMaxMS != 10000 {
+		t.Fatalf("expected retry backoff max %d, got %d", 10000, s.fetcher.RetryBackoffMaxMS)
 	}
 	if s.committer.retryBackoffBaseMS != 5000 {
 		t.Fatalf("expected committer retry backoff base %d, got %d", 5000, s.committer.retryBackoffBaseMS)
 	}
-	if s.committer.retryBackoffMaxMS != 1000 {
-		t.Fatalf("expected committer retry backoff max %d, got %d", 1000, s.committer.retryBackoffMaxMS)
+	if s.committer.retryBackoffMaxMS != 10000 {
+		t.Fatalf("expected committer retry backoff max %d, got %d", 10000, s.committer.retryBackoffMaxMS)
 	}
 }
 
 func TestNewServer_HandlesNilClaimOptions(t *testing.T) {
 	mem := memory.NewMemoryStore()
 
-	s := NewServer(mem, Config{
+	s, err := NewServer(mem, Config{
 		BatchSize:      4,
 		MaxQueue:       8,
 		MaxConcurrency: 2,
+		MaxColdTimeout: 500,
 	})
+	if err != nil {
+		t.Fatalf("expected server to build, got error: %v", err)
+	}
 
 	if s.fetcher.LeaseTTL != defaultLeaseTTL {
 		t.Fatalf("expected default lease ttl %v, got %v", defaultLeaseTTL, s.fetcher.LeaseTTL)
 	}
 	if s.consumer.beatEvery != defaultLeaseTTL/3 {
 		t.Fatalf("expected default heartbeat interval %v, got %v", defaultLeaseTTL/3, s.consumer.beatEvery)
+	}
+}
+
+func TestNewServer_RejectsInvalidConfig(t *testing.T) {
+	mem := memory.NewMemoryStore()
+
+	tests := []struct {
+		name string
+		cfg  Config
+		want string
+	}{
+		{
+			name: "missing batch size",
+			cfg:  Config{MaxQueue: 8, MaxConcurrency: 2, MaxColdTimeout: 500},
+			want: "BatchSize",
+		},
+		{
+			name: "missing queue size",
+			cfg:  Config{BatchSize: 4, MaxConcurrency: 2, MaxColdTimeout: 500},
+			want: "MaxQueue",
+		},
+		{
+			name: "missing concurrency",
+			cfg:  Config{BatchSize: 4, MaxQueue: 8, MaxColdTimeout: 500},
+			want: "MaxConcurrency",
+		},
+		{
+			name: "missing cold timeout",
+			cfg:  Config{BatchSize: 4, MaxQueue: 8, MaxConcurrency: 2},
+			want: "MaxColdTimeout",
+		},
+		{
+			name: "negative max retries",
+			cfg:  Config{BatchSize: 4, MaxQueue: 8, MaxConcurrency: 2, MaxColdTimeout: 500, ClaimOptions: &store.ClaimOptions{MaxRetries: -1}},
+			want: "MaxRetries",
+		},
+		{
+			name: "retry ratio over one",
+			cfg:  Config{BatchSize: 4, MaxQueue: 8, MaxConcurrency: 2, MaxColdTimeout: 500, ClaimOptions: &store.ClaimOptions{RetryFetchRatio: 1.2}},
+			want: "RetryFetchRatio",
+		},
+		{
+			name: "negative lease ttl",
+			cfg:  Config{BatchSize: 4, MaxQueue: 8, MaxConcurrency: 2, MaxColdTimeout: 500, ClaimOptions: &store.ClaimOptions{LeaseTTL: -time.Second}},
+			want: "LeaseTTL",
+		},
+		{
+			name: "invalid backoff range",
+			cfg:  Config{BatchSize: 4, MaxQueue: 8, MaxConcurrency: 2, MaxColdTimeout: 500, ClaimOptions: &store.ClaimOptions{RetryBackoffBaseMS: 5000, RetryBackoffMaxMS: 1000}},
+			want: "RetryBackoffBaseMS",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := NewServer(mem, tt.cfg)
+			if err == nil {
+				t.Fatal("expected config validation error, got nil")
+			}
+			if !strings.Contains(err.Error(), tt.want) {
+				t.Fatalf("expected error to mention %q, got %v", tt.want, err)
+			}
+		})
 	}
 }
 

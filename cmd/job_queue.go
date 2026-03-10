@@ -37,13 +37,16 @@ func main() {
 		RetryBackoffBaseMS: 500,
 		RetryBackoffMaxMS:  30_000,
 	}
-	server := server.NewServer(mem, server.Config{
+	srv, err := server.NewServer(mem, server.Config{
 		MaxColdTimeout: 5000,
 		BatchSize:      100,
 		MaxQueue:       1000,
 		MaxConcurrency: 4,
 		ClaimOptions:   &claimOpts,
 	})
+	if err != nil {
+		log.Fatalf("Failed to create server: %v", err)
+	}
 
 	client := client.NewClient(mem)
 	for id := 1; id <= 10000; id++ {
@@ -68,7 +71,7 @@ func main() {
 		}
 	}()
 
-	server.Run()
+	srv.Run()
 }
 
 // TODO Next Steps
