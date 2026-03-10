@@ -68,6 +68,10 @@ type FetcherConfig struct {
 
 type ConsumerConfig struct {
 	MaxConcurrency int
+	Worker         WorkerConfig
+}
+
+type WorkerConfig struct {
 	HeartbeatEvery time.Duration
 }
 
@@ -161,7 +165,9 @@ func normalizeConfig(config Config) (runtimeConfig, error) {
 		},
 		consumer: ConsumerConfig{
 			MaxConcurrency: config.MaxConcurrency,
-			HeartbeatEvery: heartbeatEvery,
+			Worker: WorkerConfig{
+				HeartbeatEvery: heartbeatEvery,
+			},
 		},
 		committer: CommitterConfig{
 			MaxRetries:         max(0, claimOpts.MaxRetries),

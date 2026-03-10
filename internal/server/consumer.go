@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"sync"
-	"time"
 )
 
 type Pending struct {
@@ -16,7 +15,7 @@ type Consumer struct {
 	pending     Pending
 	concurrency int
 	heartbeat   chan HeartBeat
-	beatEvery   time.Duration
+	worker      WorkerConfig
 }
 
 type HeartBeat struct {
@@ -29,7 +28,7 @@ func NewConsumer(opts ConsumerConfig, req chan Req, res chan Res, heartbeat chan
 		pending:     Pending{req: req, res: res},
 		concurrency: opts.MaxConcurrency,
 		heartbeat:   heartbeat,
-		beatEvery:   opts.HeartbeatEvery,
+		worker:      opts.Worker,
 	}
 }
 
@@ -53,7 +52,7 @@ func (c *Consumer) Run(ctx context.Context, queue string) {
 				req:       c.pending.req,
 				res:       c.pending.res,
 				heartbeat: c.heartbeat,
-				beatEvery: c.beatEvery,
+				beatEvery: c.worker.HeartbeatEvery,
 			}
 			w.Run(ctx)
 		}(w)

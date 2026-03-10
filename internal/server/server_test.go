@@ -64,8 +64,8 @@ func TestNewServer_WiresComponentsAndChannelCapacities(t *testing.T) {
 	if s.consumer.concurrency != cfg.MaxConcurrency {
 		t.Fatalf("expected consumer concurrency %d, got %d", cfg.MaxConcurrency, s.consumer.concurrency)
 	}
-	if s.consumer.beatEvery != cfg.ClaimOptions.LeaseTTL/3 {
-		t.Fatalf("expected consumer heartbeat interval %v, got %v", cfg.ClaimOptions.LeaseTTL/3, s.consumer.beatEvery)
+	if s.consumer.worker.HeartbeatEvery != cfg.ClaimOptions.LeaseTTL/3 {
+		t.Fatalf("expected consumer heartbeat interval %v, got %v", cfg.ClaimOptions.LeaseTTL/3, s.consumer.worker.HeartbeatEvery)
 	}
 
 	if cap(s.fetcher.pending) != cfg.MaxQueue {
@@ -179,8 +179,8 @@ func TestNewServer_NormalizesClaimOptionsOnce(t *testing.T) {
 	if s.fetcher.LeaseTTL != defaultLeaseTTL {
 		t.Fatalf("expected lease ttl %v, got %v", defaultLeaseTTL, s.fetcher.LeaseTTL)
 	}
-	if s.consumer.beatEvery != defaultLeaseTTL/3 {
-		t.Fatalf("expected heartbeat interval %v, got %v", defaultLeaseTTL/3, s.consumer.beatEvery)
+	if s.consumer.worker.HeartbeatEvery != defaultLeaseTTL/3 {
+		t.Fatalf("expected heartbeat interval %v, got %v", defaultLeaseTTL/3, s.consumer.worker.HeartbeatEvery)
 	}
 
 	s, err = NewServer(mem, Config{
@@ -232,8 +232,8 @@ func TestNewServer_HandlesNilClaimOptions(t *testing.T) {
 	if s.fetcher.LeaseTTL != defaultLeaseTTL {
 		t.Fatalf("expected default lease ttl %v, got %v", defaultLeaseTTL, s.fetcher.LeaseTTL)
 	}
-	if s.consumer.beatEvery != defaultLeaseTTL/3 {
-		t.Fatalf("expected default heartbeat interval %v, got %v", defaultLeaseTTL/3, s.consumer.beatEvery)
+	if s.consumer.worker.HeartbeatEvery != defaultLeaseTTL/3 {
+		t.Fatalf("expected default heartbeat interval %v, got %v", defaultLeaseTTL/3, s.consumer.worker.HeartbeatEvery)
 	}
 }
 

@@ -109,6 +109,8 @@ func leasedJob(id string, leasedAt time.Time) store.Job {
 func newConsumerConfig(concurrency int) ConsumerConfig {
 	return ConsumerConfig{
 		MaxConcurrency: concurrency,
-		HeartbeatEvery: time.Hour / 3,
+		Worker: WorkerConfig{
+			HeartbeatEvery: time.Hour / 3,
+		},
 	}
 }
