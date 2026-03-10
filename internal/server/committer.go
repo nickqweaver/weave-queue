@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/nickqweaver/weave-queue/internal/retry"
 	"github.com/nickqweaver/weave-queue/internal/store"
-	"github.com/nickqweaver/weave-queue/internal/utils"
 )
 
 type Committer struct {
@@ -17,6 +17,7 @@ type Committer struct {
 	retryBackoffBaseMS int
 	retryBackoffMaxMS  int
 	leaseTTL           time.Duration
+	retryCfg           retry.Config
 }
 
 func NewCommitter(
@@ -33,6 +34,11 @@ func NewCommitter(
 		retryBackoffBaseMS: opts.RetryBackoffBaseMS,
 		retryBackoffMaxMS:  opts.RetryBackoffMaxMS,
 		leaseTTL:           opts.LeaseTTL,
+		retryCfg: retry.Config{
+			MaxRetries:    opts.MaxRetries,
+			BackoffBaseMS: opts.RetryBackoffBaseMS,
+			BackoffMaxMS:  opts.RetryBackoffMaxMS,
+		},
 	}
 }
 
@@ -55,20 +61,7 @@ func (c *Committer) batchWrite(batch []Res) {
 		update := store.JobUpdate{Status: store.Succeeded}
 
 		if r.Status != Ack {
-			nextRetries := r.Job.Retries + 1
-
-			if nextRetries <= c.maxRetries {
-				retryAt := time.Now().
-					UTC().
-					Add(utils.RetryDelay(nextRetries, c.retryBackoffBaseMS, c.retryBackoffMaxMS))
-				update = store.JobUpdate{
-					Status:  store.Failed,
-					Retries: &nextRetries,
-					RetryAt: &retryAt,
-				}
-			} else {
-				update = store.JobUpdate{Status: store.Failed}
-			}
+			update = retry.FailureUpdate(r.Job, time.Now().UTC(), c.retryCfg)
 		}
 
 		var err error

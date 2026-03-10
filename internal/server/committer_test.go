@@ -139,8 +139,8 @@ func TestCommitterBatchWrite_StopsRetryingAtMaxRetries(t *testing.T) {
 	if job.Status != store.Failed {
 		t.Fatalf("expected terminal status %s, got %s", store.Failed, job.Status)
 	}
-	if job.Retries != maxRetries {
-		t.Fatalf("expected retries to remain %d, got %d", maxRetries, job.Retries)
+	if job.Retries != maxRetries+1 {
+		t.Fatalf("expected retries to increment to %d, got %d", maxRetries+1, job.Retries)
 	}
 	if job.RetryAt != nil {
 		t.Fatalf("expected retryAt to be nil once max retries is exceeded")

@@ -6,8 +6,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/nickqweaver/weave-queue/internal/retry"
 	"github.com/nickqweaver/weave-queue/internal/store"
-	"github.com/nickqweaver/weave-queue/internal/utils"
 )
 
 type MemoryStore struct {
@@ -160,6 +160,12 @@ func (n *MemoryStore) GetAllJobs() []store.Job {
 }
 
 func (n *MemoryStore) recoverExpiredLeasesLocked(now time.Time, maxRetries int, retryBackoffBaseMS int, retryBackoffMaxMS int) {
+	retryCfg := retry.Config{
+		MaxRetries:    maxRetries,
+		BackoffBaseMS: retryBackoffBaseMS,
+		BackoffMaxMS:  retryBackoffMaxMS,
+	}
+
 	for i := range n.jobs {
 		if n.jobs[i].Status != store.InFlight {
 			continue
@@ -170,18 +176,18 @@ func (n *MemoryStore) recoverExpiredLeasesLocked(now time.Time, maxRetries int, 
 		}
 
 		n.jobs[i].LeaseExpiresAt = nil
+		applyUpdate(&n.jobs[i], retry.FailureUpdate(n.jobs[i], now, retryCfg))
+	}
+}
 
-		nextRetries := n.jobs[i].Retries + 1
-		n.jobs[i].Retries = nextRetries
-		n.jobs[i].Status = store.Failed
-
-		if nextRetries <= maxRetries {
-			retryAt := now.Add(utils.RetryDelay(nextRetries, retryBackoffBaseMS, retryBackoffMaxMS))
-			n.jobs[i].RetryAt = &retryAt
-			continue
-		}
-
-		n.jobs[i].RetryAt = nil
+func applyUpdate(job *store.Job, update store.JobUpdate) {
+	job.Status = update.Status
+	if update.Retries != nil {
+		job.Retries = *update.Retries
+	}
+	job.RetryAt = update.RetryAt
+	if update.LeaseExpiresAt != nil {
+		job.LeaseExpiresAt = update.LeaseExpiresAt
 	}
 }
 
