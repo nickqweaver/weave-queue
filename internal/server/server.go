@@ -55,14 +55,71 @@ type Config struct {
 	ClaimOptions   *store.ClaimOptions
 }
 
+type FetcherConfig struct {
+	BatchSize          int
+	MaxColdTimeout     int
+	MaxRetries         int
+	LeaseTTL           time.Duration
+	RetryFetchRatio    float64
+	RetryBackoffBaseMS int
+	RetryBackoffMaxMS  int
+}
+
+type ConsumerConfig struct {
+	MaxConcurrency int
+	HeartbeatEvery time.Duration
+}
+
+type CommitterConfig struct {
+	MaxRetries         int
+	RetryBackoffBaseMS int
+	RetryBackoffMaxMS  int
+	LeaseTTL           time.Duration
+}
+
+type runtimeConfig struct {
+	batchSize int
+	maxQueue  int
+	fetcher   FetcherConfig
+	consumer  ConsumerConfig
+	committer CommitterConfig
+}
+
 func NewServer(s store.Store, config Config) Server {
-	c := config.ClaimOptions
-	leaseTTL := c.LeaseTTL
+	rc := normalizeConfig(config)
+
+	pending := make(chan Req, rc.maxQueue)
+	finished := make(chan Res, rc.batchSize)
+	heartbeat := make(chan HeartBeat)
+
+	consumer := NewConsumer(rc.consumer, pending, finished, heartbeat)
+	committer := NewCommitter(
+		rc.committer,
+		s,
+		finished,
+		heartbeat,
+	)
+	fetcher := NewFetcher(
+		rc.fetcher,
+		pending,
+	)
+	server := Server{store: s, consumer: consumer, fetcher: fetcher, committer: committer}
+
+	return server
+}
+
+func normalizeConfig(config Config) runtimeConfig {
+	claimOpts := store.ClaimOptions{}
+	if config.ClaimOptions != nil {
+		claimOpts = *config.ClaimOptions
+	}
+
+	leaseTTL := claimOpts.LeaseTTL
 	if leaseTTL <= 0 {
 		leaseTTL = defaultLeaseTTL
 	}
 
-	retryFetchRatio := c.RetryFetchRatio
+	retryFetchRatio := claimOpts.RetryFetchRatio
 	if retryFetchRatio <= 0 {
 		retryFetchRatio = defaultRetryFetchRatio
 	}
@@ -70,34 +127,44 @@ func NewServer(s store.Store, config Config) Server {
 		retryFetchRatio = 1
 	}
 
-	retryBackoffBaseMS := c.RetryBackoffBaseMS
+	retryBackoffBaseMS := claimOpts.RetryBackoffBaseMS
 	if retryBackoffBaseMS <= 0 {
 		retryBackoffBaseMS = utils.DefaultRetryBackoffBaseMS
 	}
 
-	retryBackoffMaxMS := c.RetryBackoffMaxMS
+	retryBackoffMaxMS := claimOpts.RetryBackoffMaxMS
 	if retryBackoffMaxMS <= 0 {
 		retryBackoffMaxMS = utils.DefaultRetryBackoffMaxMS
 	}
 
-	pending := make(chan Req, config.MaxQueue)
-	finished := make(chan Res, config.BatchSize)
-	heartbeat := make(chan HeartBeat)
+	heartbeatEvery := leaseTTL / 3
+	if heartbeatEvery <= 0 {
+		heartbeatEvery = leaseTTL
+	}
 
-	consumer := NewConsumer(&config, pending, finished, heartbeat)
-	committer := NewCommitter(
-		&config,
-		s,
-		finished,
-		heartbeat,
-	)
-	fetcher := NewFetcher(
-		&config,
-		pending,
-	)
-	server := Server{store: s, consumer: consumer, fetcher: fetcher, committer: committer}
-
-	return server
+	return runtimeConfig{
+		batchSize: config.BatchSize,
+		maxQueue:  config.MaxQueue,
+		fetcher: FetcherConfig{
+			BatchSize:          config.BatchSize,
+			MaxColdTimeout:     config.MaxColdTimeout,
+			MaxRetries:         claimOpts.MaxRetries,
+			LeaseTTL:           leaseTTL,
+			RetryFetchRatio:    retryFetchRatio,
+			RetryBackoffBaseMS: retryBackoffBaseMS,
+			RetryBackoffMaxMS:  retryBackoffMaxMS,
+		},
+		consumer: ConsumerConfig{
+			MaxConcurrency: config.MaxConcurrency,
+			HeartbeatEvery: heartbeatEvery,
+		},
+		committer: CommitterConfig{
+			MaxRetries:         max(0, claimOpts.MaxRetries),
+			RetryBackoffBaseMS: retryBackoffBaseMS,
+			RetryBackoffMaxMS:  retryBackoffMaxMS,
+			LeaseTTL:           leaseTTL,
+		},
+	}
 }
 
 func (s *Server) Run() {

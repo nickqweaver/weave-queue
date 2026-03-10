@@ -20,16 +20,15 @@ type Fetcher struct {
 	pending            chan Req
 }
 
-func NewFetcher(opts *Config, pending chan Req) *Fetcher {
-	cOpts := opts.ClaimOptions
+func NewFetcher(opts FetcherConfig, pending chan Req) *Fetcher {
 	return &Fetcher{
 		BatchSize:          opts.BatchSize,
 		MaxColdTimeout:     opts.MaxColdTimeout,
-		MaxRetries:         cOpts.MaxRetries,
-		LeaseTTL:           cOpts.LeaseTTL,
-		RetryFetchRatio:    cOpts.RetryFetchRatio,
-		RetryBackoffBaseMS: cOpts.RetryBackoffBaseMS,
-		RetryBackoffMaxMS:  cOpts.RetryBackoffMaxMS,
+		MaxRetries:         opts.MaxRetries,
+		LeaseTTL:           opts.LeaseTTL,
+		RetryFetchRatio:    opts.RetryFetchRatio,
+		RetryBackoffBaseMS: opts.RetryBackoffBaseMS,
+		RetryBackoffMaxMS:  opts.RetryBackoffMaxMS,
 		pending:            pending,
 	}
 }

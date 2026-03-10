@@ -24,13 +24,12 @@ type HeartBeat struct {
 	Job    string
 }
 
-func NewConsumer(opts *Config, req chan Req, res chan Res, heartbeat chan HeartBeat) *Consumer {
-	beatEvery := opts.ClaimOptions.LeaseTTL / 3
+func NewConsumer(opts ConsumerConfig, req chan Req, res chan Res, heartbeat chan HeartBeat) *Consumer {
 	return &Consumer{
 		pending:     Pending{req: req, res: res},
 		concurrency: opts.MaxConcurrency,
 		heartbeat:   heartbeat,
-		beatEvery:   beatEvery,
+		beatEvery:   opts.HeartbeatEvery,
 	}
 }
 

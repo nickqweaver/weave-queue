@@ -106,11 +106,9 @@ func leasedJob(id string, leasedAt time.Time) store.Job {
 	}
 }
 
-func newConsumerConfig(concurrency int) *Config {
-	return &Config{
+func newConsumerConfig(concurrency int) ConsumerConfig {
+	return ConsumerConfig{
 		MaxConcurrency: concurrency,
-		ClaimOptions: &store.ClaimOptions{
-			LeaseTTL: time.Hour,
-		},
+		HeartbeatEvery: time.Hour / 3,
 	}
 }

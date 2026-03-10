@@ -166,14 +166,12 @@ func newCommitterStoreStub(ids ...string) *committerStoreStub {
 	}
 }
 
-func newCommitterConfig(maxRetries int) *Config {
-	return &Config{
-		ClaimOptions: &store.ClaimOptions{
-			MaxRetries:         maxRetries,
-			LeaseTTL:           15 * time.Second,
-			RetryBackoffBaseMS: 500,
-			RetryBackoffMaxMS:  30_000,
-		},
+func newCommitterConfig(maxRetries int) CommitterConfig {
+	return CommitterConfig{
+		MaxRetries:         maxRetries,
+		LeaseTTL:           15 * time.Second,
+		RetryBackoffBaseMS: 500,
+		RetryBackoffMaxMS:  30_000,
 	}
 }
 

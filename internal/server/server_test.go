@@ -60,6 +60,9 @@ func TestNewServer_WiresComponentsAndChannelCapacities(t *testing.T) {
 	if s.consumer.concurrency != cfg.MaxConcurrency {
 		t.Fatalf("expected consumer concurrency %d, got %d", cfg.MaxConcurrency, s.consumer.concurrency)
 	}
+	if s.consumer.beatEvery != cfg.ClaimOptions.LeaseTTL/3 {
+		t.Fatalf("expected consumer heartbeat interval %v, got %v", cfg.ClaimOptions.LeaseTTL/3, s.consumer.beatEvery)
+	}
 
 	if cap(s.fetcher.pending) != cfg.MaxQueue {
 		t.Fatalf("expected pending channel cap %d, got %d", cfg.MaxQueue, cap(s.fetcher.pending))
@@ -136,7 +139,7 @@ func TestServerClose_ShutsDownRunAndIsIdempotent(t *testing.T) {
 	}
 }
 
-func TestNewServer_PreservesClaimOptionsWithoutClampingToBase(t *testing.T) {
+func TestNewServer_NormalizesClaimOptionsOnce(t *testing.T) {
 	mem := memory.NewMemoryStore()
 
 	s := NewServer(mem, Config{
@@ -146,21 +149,27 @@ func TestNewServer_PreservesClaimOptionsWithoutClampingToBase(t *testing.T) {
 		ClaimOptions:   &store.ClaimOptions{},
 	})
 
-	if s.fetcher.RetryFetchRatio != 0 {
-		t.Fatalf("expected retry fetch ratio %.2f, got %.2f", 0.0, s.fetcher.RetryFetchRatio)
+	if s.fetcher.RetryFetchRatio != defaultRetryFetchRatio {
+		t.Fatalf("expected retry fetch ratio %.2f, got %.2f", defaultRetryFetchRatio, s.fetcher.RetryFetchRatio)
 	}
 
-	if s.fetcher.RetryBackoffBaseMS != 0 {
-		t.Fatalf("expected retry backoff base %d, got %d", 0, s.fetcher.RetryBackoffBaseMS)
+	if s.fetcher.RetryBackoffBaseMS != 500 {
+		t.Fatalf("expected retry backoff base %d, got %d", 500, s.fetcher.RetryBackoffBaseMS)
 	}
-	if s.fetcher.RetryBackoffMaxMS != 0 {
-		t.Fatalf("expected retry backoff max %d, got %d", 0, s.fetcher.RetryBackoffMaxMS)
+	if s.fetcher.RetryBackoffMaxMS != 30_000 {
+		t.Fatalf("expected retry backoff max %d, got %d", 30_000, s.fetcher.RetryBackoffMaxMS)
 	}
-	if s.committer.retryBackoffBaseMS != 0 {
-		t.Fatalf("expected committer retry backoff base %d, got %d", 0, s.committer.retryBackoffBaseMS)
+	if s.committer.retryBackoffBaseMS != 500 {
+		t.Fatalf("expected committer retry backoff base %d, got %d", 500, s.committer.retryBackoffBaseMS)
 	}
-	if s.committer.retryBackoffMaxMS != 0 {
-		t.Fatalf("expected committer retry backoff max %d, got %d", 0, s.committer.retryBackoffMaxMS)
+	if s.committer.retryBackoffMaxMS != 30_000 {
+		t.Fatalf("expected committer retry backoff max %d, got %d", 30_000, s.committer.retryBackoffMaxMS)
+	}
+	if s.fetcher.LeaseTTL != defaultLeaseTTL {
+		t.Fatalf("expected lease ttl %v, got %v", defaultLeaseTTL, s.fetcher.LeaseTTL)
+	}
+	if s.consumer.beatEvery != defaultLeaseTTL/3 {
+		t.Fatalf("expected heartbeat interval %v, got %v", defaultLeaseTTL/3, s.consumer.beatEvery)
 	}
 
 	s = NewServer(mem, Config{
@@ -189,6 +198,23 @@ func TestNewServer_PreservesClaimOptionsWithoutClampingToBase(t *testing.T) {
 	}
 	if s.committer.retryBackoffMaxMS != 1000 {
 		t.Fatalf("expected committer retry backoff max %d, got %d", 1000, s.committer.retryBackoffMaxMS)
+	}
+}
+
+func TestNewServer_HandlesNilClaimOptions(t *testing.T) {
+	mem := memory.NewMemoryStore()
+
+	s := NewServer(mem, Config{
+		BatchSize:      4,
+		MaxQueue:       8,
+		MaxConcurrency: 2,
+	})
+
+	if s.fetcher.LeaseTTL != defaultLeaseTTL {
+		t.Fatalf("expected default lease ttl %v, got %v", defaultLeaseTTL, s.fetcher.LeaseTTL)
+	}
+	if s.consumer.beatEvery != defaultLeaseTTL/3 {
+		t.Fatalf("expected default heartbeat interval %v, got %v", defaultLeaseTTL/3, s.consumer.beatEvery)
 	}
 }
 
