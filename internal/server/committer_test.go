@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/nickqweaver/weave-queue/internal/store"
+	memory "github.com/nickqweaver/weave-queue/internal/store/adapters/memory"
 )
 
 func TestCommitterBatchWrite_MapsAckAndNackStatuses(t *testing.T) {
@@ -147,6 +148,146 @@ func TestCommitterBatchWrite_StopsRetryingAtMaxRetries(t *testing.T) {
 	}
 }
 
+func TestCommitterRun_HeartbeatRenewsLease(t *testing.T) {
+	mem := memory.NewMemoryStore()
+	res := make(chan Res)
+	heartbeat := make(chan HeartBeat, 1)
+	leaseTTL := 50 * time.Millisecond
+	committer := NewCommitter(CommitterConfig{
+		MaxRetries:         3,
+		LeaseTTL:           leaseTTL,
+		RetryBackoffBaseMS: 500,
+		RetryBackoffMaxMS:  30_000,
+	}, mem, res, heartbeat)
+
+	now := time.Now().UTC()
+	initialLease := now.Add(10 * time.Millisecond)
+	job := store.Job{ID: "job-1", Status: store.InFlight, LeaseExpiresAt: &initialLease}
+	if err := mem.AddJob(job); err != nil {
+		t.Fatalf("failed to seed job: %v", err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	runDone := make(chan struct{})
+	close(res)
+	go func() {
+		committer.run(ctx)
+		close(runDone)
+	}()
+
+	beforeRenewal := time.Now().UTC()
+	heartbeat <- HeartBeat{Worker: 1, Job: job.ID}
+
+	deadline := time.Now().Add(time.Second)
+	for time.Now().Before(deadline) {
+		stored := jobsByID(mem.GetAllJobs())[job.ID]
+		if stored.LeaseExpiresAt != nil && stored.LeaseExpiresAt.After(beforeRenewal.Add(leaseTTL-10*time.Millisecond)) {
+			cancel()
+			close(heartbeat)
+			<-runDone
+			return
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+
+	cancel()
+	close(heartbeat)
+	<-runDone
+	t.Fatal("expected heartbeat to renew lease")
+}
+
+func TestHeartbeatPreventsFalseReclaimUntilHeartbeatsStop(t *testing.T) {
+	mem := memory.NewMemoryStore()
+	res := make(chan Res)
+	heartbeat := make(chan HeartBeat, 4)
+	leaseTTL := 30 * time.Millisecond
+	committer := NewCommitter(CommitterConfig{
+		MaxRetries:         3,
+		LeaseTTL:           leaseTTL,
+		RetryBackoffBaseMS: 500,
+		RetryBackoffMaxMS:  30_000,
+	}, mem, res, heartbeat)
+
+	now := time.Now().UTC()
+	initialLease := now.Add(15 * time.Millisecond)
+	job := store.Job{ID: "job-1", Status: store.InFlight, LeaseExpiresAt: &initialLease}
+	if err := mem.AddJob(job); err != nil {
+		t.Fatalf("failed to seed job: %v", err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	runDone := make(chan struct{})
+	close(res)
+	go func() {
+		committer.run(ctx)
+		close(runDone)
+	}()
+
+	claimOpts := store.ClaimOptions{
+		Limit:              1,
+		LeaseTTL:           leaseTTL,
+		MaxRetries:         3,
+		RetryFetchRatio:    0.20,
+		RetryBackoffBaseMS: 500,
+		RetryBackoffMaxMS:  30_000,
+	}
+
+	for i := 0; i < 3; i++ {
+		time.Sleep(10 * time.Millisecond)
+		heartbeat <- HeartBeat{Worker: 1, Job: job.ID}
+		time.Sleep(10 * time.Millisecond)
+
+		claimed := mem.ClaimAvailable(claimOpts)
+		if len(claimed) != 0 {
+			cancel()
+			close(heartbeat)
+			<-runDone
+			t.Fatalf("expected no jobs claimed while heartbeats are active, got %d", len(claimed))
+		}
+
+		stored := jobsByID(mem.GetAllJobs())[job.ID]
+		if stored.Status != store.InFlight {
+			cancel()
+			close(heartbeat)
+			<-runDone
+			t.Fatalf("expected job to remain %s during active heartbeats, got %s", store.InFlight, stored.Status)
+		}
+	}
+
+	time.Sleep(leaseTTL + 10*time.Millisecond)
+	claimed := mem.ClaimAvailable(claimOpts)
+	if len(claimed) != 0 {
+		cancel()
+		close(heartbeat)
+		<-runDone
+		t.Fatalf("expected no jobs claimed after expiry recovery, got %d", len(claimed))
+	}
+
+	stored := jobsByID(mem.GetAllJobs())[job.ID]
+	if stored.Status != store.Failed {
+		cancel()
+		close(heartbeat)
+		<-runDone
+		t.Fatalf("expected job to be recovered as %s after heartbeats stop, got %s", store.Failed, stored.Status)
+	}
+	if stored.Retries != 1 {
+		cancel()
+		close(heartbeat)
+		<-runDone
+		t.Fatalf("expected recovered job retries to be 1, got %d", stored.Retries)
+	}
+	if stored.RetryAt == nil {
+		cancel()
+		close(heartbeat)
+		<-runDone
+		t.Fatal("expected recovered job retryAt to be scheduled")
+	}
+
+	cancel()
+	close(heartbeat)
+	<-runDone
+}
+
 type committerStoreStub struct {
 	mu      sync.Mutex
 	jobs    map[string]store.Job
@@ -173,6 +314,14 @@ func newCommitterConfig(maxRetries int) CommitterConfig {
 		RetryBackoffBaseMS: 500,
 		RetryBackoffMaxMS:  30_000,
 	}
+}
+
+func jobsByID(jobs []store.Job) map[string]store.Job {
+	indexed := make(map[string]store.Job, len(jobs))
+	for _, job := range jobs {
+		indexed[job.ID] = job
+	}
+	return indexed
 }
 
 func (s *committerStoreStub) setFailure(id string, err error) {
