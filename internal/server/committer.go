@@ -58,10 +58,11 @@ func (c *Committer) batchWrite(batch []Res) {
 			continue
 		}
 
-		update := store.JobUpdate{Status: store.Succeeded}
+		update := store.JobUpdate{Status: store.Succeeded, LeaseToken: r.Job.LeaseToken}
 
 		if r.Status != Ack {
 			update = retry.FailureUpdate(r.Job, time.Now().UTC(), c.retryCfg)
+			update.LeaseToken = r.Job.LeaseToken
 		}
 
 		var err error
@@ -89,6 +90,13 @@ func (c *Committer) run(ctx context.Context) {
 				continue
 			}
 
+			freshJob := c.store.GetJob(r.Job.ID)
+
+			if freshJob.LeaseToken != r.Job.LeaseToken {
+				// Skip this update, another worker is handling it so this is considered stale
+				continue
+			}
+
 			batch = append(batch, r)
 
 			if len(batch) == batchSize {
@@ -108,9 +116,17 @@ func (c *Committer) run(ctx context.Context) {
 			now := time.Now().UTC()
 			leaseExpiresAt := now.Add(ttl)
 			jobID := hb.Job
+
+			freshJob := c.store.GetJob(jobID)
+
+			if freshJob.LeaseToken != hb.LeaseToken {
+				// Skip this update, another worker is handling it
+				continue
+			}
+
 			if err := c.store.UpdateJob(
 				jobID,
-				store.JobUpdate{Status: store.InFlight, LeaseExpiresAt: &leaseExpiresAt},
+				store.JobUpdate{Status: store.InFlight, LeaseExpiresAt: &leaseExpiresAt, LeaseToken: hb.LeaseToken},
 			); err != nil {
 				fmt.Printf("Error updating heartbeat lease for job %s: %v\n", jobID, err)
 			}

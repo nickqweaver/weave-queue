@@ -19,11 +19,17 @@ type Consumer struct {
 }
 
 type HeartBeat struct {
-	Worker int
-	Job    string
+	Worker     int
+	Job        string
+	LeaseToken int
 }
 
-func NewConsumer(opts ConsumerConfig, req chan Req, res chan Res, heartbeat chan HeartBeat) *Consumer {
+func NewConsumer(
+	opts ConsumerConfig,
+	req chan Req,
+	res chan Res,
+	heartbeat chan HeartBeat,
+) *Consumer {
 	return &Consumer{
 		pending:     Pending{req: req, res: res},
 		concurrency: opts.MaxConcurrency,

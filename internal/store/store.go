@@ -32,6 +32,7 @@ type Job struct {
 	Status         Status
 	Timeout        time.Duration
 	LeaseExpiresAt *time.Time
+	LeaseToken     int
 	RetryAt        *time.Time
 	Retries        int
 	Task           string // This is the Task Key ("email.send.v1"), which is used to lookup the handler from the Task Registry
@@ -42,6 +43,7 @@ type JobUpdate struct {
 	Retries        *int
 	RetryAt        *time.Time
 	LeaseExpiresAt *time.Time
+	LeaseToken     int
 }
 
 type ClaimOptions struct {
@@ -60,4 +62,5 @@ type Store interface {
 	AddJob(job Job) error
 	UpdateJob(id string, update JobUpdate) error
 	GetAllJobs() []Job
+	GetJob(id string) Job
 }

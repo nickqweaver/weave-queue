@@ -1,82 +1,293 @@
-# Job Queue Fault Tolerance TODO
+# MVP TODO
 
-## Context
+This document defines the work required for the queue to be considered MVP-complete and blog-worthy.
 
-- Jobs can get stuck in `InFlight` when a process crashes after claim and before `Ack`/`NAck`.
-- This is not just a startup issue; it can happen any time between lease claim and commit.
-- Current flow has retries for `NAck`, but no recovery path for expired `InFlight` leases.
+## MVP Definition
 
-## Key Decisions From Discussion
+- At-least-once job delivery works end-to-end
+- Long-running jobs remain leased via heartbeat
+- Expired or abandoned jobs are safely recovered and retried
+- Stale workers cannot ack, nack, or renew a reclaimed job
+- Jobs execute real registered tasks instead of demo logic
+- Public client/server APIs are shippable from `pkg/`
+- Redis is available as a working backing store adapter
+- The repo includes enough docs/tests/examples to explain the design clearly
 
-- Add lease-expiry recovery as a core runtime behavior (not only on startup).
-- Keep weighted fetch logic focused on fairness/starvation, not correctness recovery.
-- Count lease expiry as a retry (recommended), same as `NAck`.
-- Keep worker timeout and heartbeat as separate concerns:
-  - Worker timeout = max execution policy.
-  - Heartbeat = lease ownership signal to prevent false reclaims for healthy long-running jobs.
+---
 
-## Why Heartbeat Matters (Example)
+## 1. Core Runtime Cleanup
 
-- Long job runtime (8-12 min), short lease TTL (30s) for quick crash detection.
-- Without heartbeat: lease expires while worker is healthy -> job reclaimed -> duplicate processing.
-- With heartbeat: worker extends lease periodically while active; reclaim only happens when heartbeats stop.
+### 1.1 Config and constructor cleanup
 
-## Recommended Implementation Order
+- [x] Replace long constructor arg chains with focused config/option structs
+- [x] Centralize config validation/defaulting in one place
+- [x] Remove duplicated retry/lease/backoff config plumbing across runtime components
+- [x] Make invalid config fail fast with clear errors
 
-1. Implement expired-lease recovery (must-have first).
-2. Reuse a single retry policy path for both `NAck` and lease-expiry recovery.
-3. Add lease fencing token/version so stale `Ack`/`NAck` cannot overwrite newer lease state.
-4. Split execution timeout from lease timeout (separate semantics).
-5. Add heartbeat lease extension.
-6. Add observability metrics/logging for recovery and stale-token behavior.
+Notes:
 
-## Phase 1: Expired-Lease Recovery (Immediate Next Step)
+- Avoid hidden defaults spread across `server`, `fetcher`, `consumer`, and `committer`.
+- Nil or zero-value config should not panic.
+- Done: `Fetcher`, `Consumer`, and `Committer` now receive focused configs, and normalization/defaulting is centralized in server construction.
+- Done: invalid top-level and claim config now returns explicit construction errors instead of being silently clamped or panicking later.
 
-### Store API changes
+### 1.2 Runtime flow cleanup
 
-- Add a recovery operation, e.g.:
-  - `RecoverExpiredLeases(now time.Time, limit int) []Job`
-  - or fold recovery into `FetchAndClaim` internals.
+- [x] Make fetcher, consumer, worker, and committer responsibilities explicit and non-overlapping
+- [ ] Remove demo-only logic that does not belong in the runtime path
+- [ ] Normalize naming for leases, retries, queue names, and task execution
+- [ ] Remove resolved TODOs and stale comments from runtime code
 
-### Recovery behavior
+Notes:
 
-- For `InFlight` jobs where `leased_at + timeout <= now`:
-  - Increment retries.
-  - If retries `<= maxRetries`: set `Status=Failed`, schedule `RetryAt=now+backoff`, clear lease fields.
-  - Else: terminal `Failed` with no `RetryAt`.
+- Done: runtime config is split by component, worker-specific settings are grouped under `WorkerConfig`, and retry state transitions are centralized in a shared retry module instead of being duplicated across committer and lease recovery.
 
-### Runtime integration
+### 1.3 Shutdown and lifecycle
 
-- Run recovery in two places:
-  1. On startup: drain expired leases until no more are returned.
-  2. In normal fetch loop: bounded periodic recovery batches.
+- [ ] Ensure clean shutdown across fetcher, workers, and committer
+- [ ] Ensure channels are closed exactly once and in the correct order
+- [ ] Ensure in-flight work exits predictably on context cancellation
+- [ ] Add tests for shutdown with active work and idle workers
 
-## Worker Timeout vs Heartbeat
+---
 
-- Do not replace worker timeout with heartbeat.
-- Keep both:
-  - Timeout cancels jobs that exceed max allowed runtime.
-  - Heartbeat extends lease while worker is healthy.
-- Suggested heartbeat interval: around `leaseTTL / 3`.
+## 2. Fault Tolerance and Lease Correctness
 
-## Testing Plan
+### 2.1 Lease lifecycle
 
-- Expired in-flight jobs are reclaimed and retried (startup and periodic flows).
-- Crash-after-claim-before-ack scenario no longer leaves jobs stuck forever.
-- Stale `Ack`/`NAck` rejected after lease is re-claimed (once fencing is added).
-- Heartbeat keeps lease alive during long processing.
-- Worker timeout still `NAck`s when execution deadline is exceeded.
+- [ ] Define the full lease lifecycle: claim, heartbeat renew, ack/nack, expiry, reclaim
+- [x] Separate job execution timeout from lease TTL semantics
+- [x] Ensure claimed jobs always receive lease metadata
+- [ ] Ensure ack/nack paths clear lease state correctly
 
-## Files Likely Involved
+Notes:
 
-- `internal/store/store.go`
-- `internal/store/adapters/memory/memory.go`
-- `internal/server/fetcher.go`
-- `internal/server/worker.go`
-- `internal/server/committer.go`
-- `internal/server/*_test.go`
-- `internal/store/adapters/memory/memory_test.go`
+- Execution timeout answers "how long may this task run?"
+- Lease TTL answers "how long do we trust this worker without hearing from it?"
 
-# Other
+### 2.2 Heartbeat completion
 
-1. Do we need to respawn crashed workers? Eg listen for failure and spawn a new one for redundancy
+- [x] Finish heartbeat renewal for long-running jobs
+- [x] Set a safe heartbeat interval relative to lease TTL
+- [x] Prevent invalid ticker behavior when heartbeat/lease config is missing or zero
+- [x] Stop heartbeat goroutines promptly when work completes or is canceled
+- [x] Add tests proving healthy long-running jobs are not reclaimed
+
+Notes:
+
+- Done: heartbeat renewals extend lease expiry through the committer, worker heartbeat goroutines are shut down per job, and tests now prove active heartbeats prevent false reclaim until heartbeats stop.
+- Remaining: add a defensive worker-side guard for invalid heartbeat intervals and later thread lease fencing through heartbeat renewals.
+
+### 2.3 Expired lease recovery
+
+- [x] Recover expired `InFlight` jobs during normal runtime
+- [x] Route expired-lease recovery through the same retry policy used by `NAck`
+- [x] Increment retry count on lease expiry
+- [x] Mark jobs terminal when retry limit is exceeded
+- [x] Add tests for crash-after-claim-before-ack recovery
+
+### 2.4 Lease fencing
+
+- [x] Add lease token/version to the job model
+- [x] Increment the token every time a job is claimed or re-claimed
+- [x] Require ack operations to include the active lease token
+- [x] Require nack operations to include the active lease token
+- [x] Require heartbeat renewals to include the active lease token
+- [x] Reject stale writes when the token no longer matches store state
+- [x] Add tests covering stale ack, stale nack, and stale heartbeat rejection
+
+Notes:
+
+- This is required for the fault-tolerance story to be correct.
+- Reclaimed jobs must not be writable by the old worker.
+- Done: lease tokens are now persisted on jobs, minted on claim/reclaim paths, carried through worker responses and heartbeats, and enforced on updates with stale-write coverage in tests.
+
+### 2.5 Retry policy consistency
+
+- [x] Use one retry decision path for worker failures and lease-expiry recovery
+- [x] Ensure retry scheduling always applies the same backoff rules
+- [x] Ensure terminal failures are represented consistently
+- [x] Add tests for retry count, retry scheduling, and terminal failure behavior
+
+Notes:
+
+- Done: retry transition rules now live in `internal/retry/` and are reused by both committer writes and expired-lease recovery.
+
+---
+
+## 3. Queue Model and Public Behavior
+
+### 3.1 Queue semantics
+
+- [ ] Decide and document MVP queue behavior
+- [ ] Support consuming a specific named queue
+- [ ] Ensure claiming/filtering respects queue name
+- [ ] Add tests proving jobs from other queues are not consumed accidentally
+
+Notes:
+
+- MVP does not need advanced multi-queue scheduling.
+- Simple and explicit is enough: producer writes to a queue, worker/server consumes a queue.
+
+### 3.2 Job model cleanup
+
+- [ ] Finalize the minimal MVP job fields
+- [ ] Distinguish store-managed fields from user-supplied fields
+- [ ] Add payload/task metadata needed for real execution
+- [ ] Remove fields that only exist for the current demo path
+
+---
+
+## 4. Tasks and Task Registry
+
+### 4.1 Task execution model
+
+- [ ] Replace `doWork` demo logic with real task execution
+- [ ] Define the task handler interface
+- [ ] Define how job payload data is passed into handlers
+- [ ] Define how handlers return success vs retryable/non-retryable failure
+
+### 4.2 Task registry
+
+- [ ] Add a task registry keyed by task name
+- [ ] Support registering handlers before server startup
+- [ ] Validate that enqueued jobs reference known task names
+- [ ] Return clear errors for unknown or duplicate task registration
+
+### 4.3 Enqueue API for real jobs
+
+- [ ] Add enqueue support for task name + payload + queue name
+- [ ] Validate required enqueue fields
+- [ ] Preserve job metadata needed for retries and execution
+- [ ] Add tests for successful enqueue and invalid task/job input
+
+### 4.4 Worker integration
+
+- [ ] Make workers resolve task handlers from the registry
+- [ ] Execute handlers under job timeout constraints
+- [ ] Convert handler results into ack/nack behavior
+- [ ] Preserve fault-tolerance behavior with real handlers in place
+
+Notes:
+
+- This is the step that turns the project from a queue prototype into a usable library.
+
+---
+
+## 5. Public Package Layout
+
+### 5.1 Exported package structure
+
+- [ ] Move shippable public APIs from `internal/` to `pkg/`
+- [ ] Keep store internals/adapters private unless intentionally supported as public API
+- [ ] Expose a clean producer/client package
+- [ ] Expose a clean worker/server package
+
+### 5.2 Public API cleanup
+
+- [ ] Finalize exported types and method names
+- [ ] Remove demo-oriented API surfaces from the public package layout
+- [ ] Keep the public API small enough to support without churn
+- [ ] Add package-level examples for the intended usage flow
+
+Notes:
+
+- Do this after the task execution model is stable enough that exported APIs will not immediately change again.
+
+---
+
+## 6. Redis Backing Store
+
+### 6.1 Redis adapter design
+
+- [ ] Define the Redis data model for ready, in-flight, retrying, failed, and succeeded jobs
+- [ ] Define how leases and lease tokens are stored atomically
+- [ ] Define how delayed retries become visible again
+- [ ] Define the minimum Redis commands/scripts needed for safe claim/update flows
+
+### 6.2 Redis adapter implementation
+
+- [ ] Implement the store interface with Redis
+- [ ] Implement atomic claim + lease assignment
+- [ ] Implement atomic ack/nack guarded by lease token
+- [ ] Implement heartbeat lease renewal guarded by lease token
+- [ ] Implement expired-lease recovery behavior
+- [ ] Implement retry scheduling with backoff
+
+### 6.3 Redis tests
+
+- [ ] Add adapter-level tests for claim, ack, nack, retry, and recovery
+- [ ] Add tests for stale token rejection
+- [ ] Add tests for process-restart durability expectations
+- [ ] Add end-to-end tests using the Redis adapter
+
+Notes:
+
+- For MVP, "durable enough" means jobs survive process restart and runtime coordination works correctly against Redis.
+
+---
+
+## 7. Testing and Verification
+
+### 7.1 Runtime correctness tests
+
+- [ ] Add end-to-end tests for successful task execution
+- [ ] Add end-to-end tests for retryable task failure
+- [ ] Add end-to-end tests for terminal failure after max retries
+- [x] Add end-to-end tests for lease expiry and reclaim
+- [x] Add end-to-end tests for heartbeat keeping a job alive
+
+### 7.2 Concurrency and failure tests
+
+- [ ] Add tests for concurrent workers processing the same queue safely
+- [x] Add tests for duplicate/stale worker responses being rejected
+- [ ] Add tests for shutdown during active processing
+- [ ] Add tests for Redis-backed recovery after server restart
+
+### 7.3 MVP acceptance checks
+
+- [x] Verify all adapters/tests pass through `go test ./...`
+- [ ] Verify the example app runs with real registered tasks
+- [ ] Verify one documented crash/recovery scenario manually
+- [ ] Verify one documented long-running heartbeat scenario manually
+
+---
+
+## 8. Docs and Blog Readiness
+
+### 8.1 README and usage docs
+
+- [ ] Rewrite `README.md` to describe what the queue does today
+- [ ] Document delivery guarantees and non-goals
+- [ ] Document queues, retries, leases, heartbeat, and lease fencing
+- [ ] Document how to register tasks and enqueue jobs
+- [ ] Document how to run the project with Redis locally
+
+### 8.2 Example application
+
+- [ ] Replace the current demo with a realistic example using registered tasks
+- [ ] Show one success path and one retry path
+- [ ] Show configuration for queue name, concurrency, and Redis
+- [ ] Keep the example simple enough to support the blog write-up
+
+### 8.3 Blog support material
+
+- [ ] Capture the architecture in one diagram or concise section
+- [ ] Capture one crash-recovery walkthrough
+- [ ] Capture one stale-worker / lease-fencing walkthrough
+- [ ] Capture the tradeoff: Redis-backed MVP, not production-grade distributed queue
+
+---
+
+## Exit Criteria
+
+The MVP is done when all of the following are true:
+
+- [ ] A user can register a task, enqueue a job, and process it successfully
+- [ ] Failed jobs retry with backoff and stop at the configured retry limit
+- [ ] Long-running jobs stay leased via heartbeat
+- [ ] Expired jobs are reclaimed safely
+- [x] Stale workers cannot mutate reclaimed jobs because lease fencing is enforced
+- [ ] The public API lives in `pkg/` and is usable without depending on `internal/`
+- [ ] Redis works as a backing store for the MVP flow
+- [ ] The docs/example are strong enough to support the blog post

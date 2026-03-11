@@ -20,7 +20,13 @@ func (p Producer) Enqueue(queue string, id string) error {
 	}
 
 	// Create Job in Database with data
-	job := store.Job{ID: id, Status: store.Ready, Queue: queue, Timeout: time.Minute * 15}
+	job := store.Job{
+		ID:         id,
+		Status:     store.Ready,
+		Queue:      queue,
+		Timeout:    time.Minute * 15,
+		LeaseToken: 0,
+	}
 	return p.store.AddJob(job)
 }
 

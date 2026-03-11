@@ -18,8 +18,8 @@ func TestCommitterBatchWrite_MapsAckAndNackStatuses(t *testing.T) {
 	before := time.Now().UTC()
 
 	c.batchWrite([]Res{
-		{ID: "job-1", Status: Ack, Job: store.Job{ID: "job-1", Retries: 0}},
-		{ID: "job-2", Status: NAck, Job: store.Job{ID: "job-2", Retries: 0}},
+		{ID: "job-1", Status: Ack, Job: store.Job{ID: "job-1", Retries: 0, LeaseToken: 1}},
+		{ID: "job-2", Status: NAck, Job: store.Job{ID: "job-2", Retries: 0, LeaseToken: 1}},
 	})
 
 	job, ok := s.job("job-1")
@@ -57,9 +57,9 @@ func TestCommitterRun_FlushesFinalPartialBatchOnClose(t *testing.T) {
 	heartbeat := make(chan HeartBeat, 1)
 	c := NewCommitter(newCommitterConfig(3), s, res, heartbeat)
 
-	res <- Res{ID: "1", Status: Ack, Job: store.Job{ID: "1", Retries: 0}}
-	res <- Res{ID: "2", Status: Ack, Job: store.Job{ID: "2", Retries: 0}}
-	res <- Res{ID: "3", Status: NAck, Job: store.Job{ID: "3", Retries: 1}}
+	res <- Res{ID: "1", Status: Ack, Job: store.Job{ID: "1", Retries: 0, LeaseToken: 1}}
+	res <- Res{ID: "2", Status: Ack, Job: store.Job{ID: "2", Retries: 0, LeaseToken: 1}}
+	res <- Res{ID: "3", Status: NAck, Job: store.Job{ID: "3", Retries: 1, LeaseToken: 1}}
 	close(res)
 	close(heartbeat)
 
@@ -97,9 +97,9 @@ func TestCommitterBatchWrite_ContinuesAfterUpdateError(t *testing.T) {
 	c := NewCommitter(newCommitterConfig(3), s, make(chan Res, 1), make(chan HeartBeat, 1))
 
 	c.batchWrite([]Res{
-		{ID: "1", Status: Ack, Job: store.Job{ID: "1", Retries: 0}},
-		{ID: "2", Status: Ack, Job: store.Job{ID: "2", Retries: 0}},
-		{ID: "3", Status: NAck, Job: store.Job{ID: "3", Retries: 0}},
+		{ID: "1", Status: Ack, Job: store.Job{ID: "1", Retries: 0, LeaseToken: 1}},
+		{ID: "2", Status: Ack, Job: store.Job{ID: "2", Retries: 0, LeaseToken: 1}},
+		{ID: "3", Status: NAck, Job: store.Job{ID: "3", Retries: 0, LeaseToken: 1}},
 	})
 
 	if s.updateCount() != 3 {
@@ -123,7 +123,7 @@ func TestCommitterBatchWrite_StopsRetryingAtMaxRetries(t *testing.T) {
 	const maxRetries = 3
 
 	s := newCommitterStoreStub("job-1")
-	seed := store.Job{ID: "job-1", Status: store.InFlight, Retries: maxRetries}
+	seed := store.Job{ID: "job-1", Status: store.InFlight, Retries: maxRetries, LeaseToken: 1}
 	if err := s.AddJob(seed); err != nil {
 		t.Fatalf("failed seeding job: %v", err)
 	}
@@ -162,7 +162,7 @@ func TestCommitterRun_HeartbeatRenewsLease(t *testing.T) {
 
 	now := time.Now().UTC()
 	initialLease := now.Add(10 * time.Millisecond)
-	job := store.Job{ID: "job-1", Status: store.InFlight, LeaseExpiresAt: &initialLease}
+	job := store.Job{ID: "job-1", Status: store.InFlight, LeaseExpiresAt: &initialLease, LeaseToken: 1}
 	if err := mem.AddJob(job); err != nil {
 		t.Fatalf("failed to seed job: %v", err)
 	}
@@ -176,7 +176,7 @@ func TestCommitterRun_HeartbeatRenewsLease(t *testing.T) {
 	}()
 
 	beforeRenewal := time.Now().UTC()
-	heartbeat <- HeartBeat{Worker: 1, Job: job.ID}
+	heartbeat <- HeartBeat{Worker: 1, Job: job.ID, LeaseToken: job.LeaseToken}
 
 	deadline := time.Now().Add(time.Second)
 	for time.Now().Before(deadline) {
@@ -210,7 +210,7 @@ func TestHeartbeatPreventsFalseReclaimUntilHeartbeatsStop(t *testing.T) {
 
 	now := time.Now().UTC()
 	initialLease := now.Add(15 * time.Millisecond)
-	job := store.Job{ID: "job-1", Status: store.InFlight, LeaseExpiresAt: &initialLease}
+	job := store.Job{ID: "job-1", Status: store.InFlight, LeaseExpiresAt: &initialLease, LeaseToken: 1}
 	if err := mem.AddJob(job); err != nil {
 		t.Fatalf("failed to seed job: %v", err)
 	}
@@ -234,7 +234,7 @@ func TestHeartbeatPreventsFalseReclaimUntilHeartbeatsStop(t *testing.T) {
 
 	for i := 0; i < 3; i++ {
 		time.Sleep(10 * time.Millisecond)
-		heartbeat <- HeartBeat{Worker: 1, Job: job.ID}
+		heartbeat <- HeartBeat{Worker: 1, Job: job.ID, LeaseToken: job.LeaseToken}
 		time.Sleep(10 * time.Millisecond)
 
 		claimed := mem.ClaimAvailable(claimOpts)
@@ -288,6 +288,157 @@ func TestHeartbeatPreventsFalseReclaimUntilHeartbeatsStop(t *testing.T) {
 	<-runDone
 }
 
+func TestCommitterRun_HeartbeatIgnoresStaleLeaseToken(t *testing.T) {
+	mem := memory.NewMemoryStore()
+	res := make(chan Res)
+	heartbeat := make(chan HeartBeat, 1)
+	committer := NewCommitter(newCommitterConfig(3), mem, res, heartbeat)
+
+	now := time.Now().UTC()
+	lease := now.Add(20 * time.Millisecond)
+	job := store.Job{ID: "job-1", Status: store.InFlight, LeaseExpiresAt: &lease, LeaseToken: 2}
+	if err := mem.AddJob(job); err != nil {
+		t.Fatalf("failed to seed job: %v", err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	runDone := make(chan struct{})
+	close(res)
+	go func() {
+		committer.run(ctx)
+		close(runDone)
+	}()
+
+	heartbeat <- HeartBeat{Worker: 1, Job: job.ID, LeaseToken: 1}
+	time.Sleep(25 * time.Millisecond)
+
+	stored := jobsByID(mem.GetAllJobs())[job.ID]
+	if stored.LeaseExpiresAt == nil || !stored.LeaseExpiresAt.Equal(lease) {
+		cancel()
+		close(heartbeat)
+		<-runDone
+		t.Fatalf("expected stale heartbeat to leave lease unchanged, got %v want %v", stored.LeaseExpiresAt, lease)
+	}
+
+	cancel()
+	close(heartbeat)
+	<-runDone
+}
+
+func TestCommitterRun_AckIgnoresStaleLeaseToken(t *testing.T) {
+	s := newCommitterStoreStub("job-1")
+	seed := store.Job{ID: "job-1", Status: store.InFlight, LeaseToken: 2}
+	if err := s.AddJob(seed); err != nil {
+		t.Fatalf("failed seeding job: %v", err)
+	}
+
+	res := make(chan Res, 1)
+	heartbeat := make(chan HeartBeat)
+	c := NewCommitter(newCommitterConfig(3), s, res, heartbeat)
+
+	res <- Res{ID: "job-1", Status: Ack, Job: store.Job{ID: "job-1", LeaseToken: 1}}
+	close(res)
+	close(heartbeat)
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	c.run(ctx)
+
+	job, _ := s.job("job-1")
+	if job.Status != store.InFlight {
+		t.Fatalf("expected stale ack to leave job %s, got %s", store.InFlight, job.Status)
+	}
+	if s.updateCount() != 0 {
+		t.Fatalf("expected stale ack to skip store updates, got %d", s.updateCount())
+	}
+}
+
+func TestCommitterRun_NAckIgnoresStaleLeaseToken(t *testing.T) {
+	s := newCommitterStoreStub("job-1")
+	seed := store.Job{ID: "job-1", Status: store.InFlight, LeaseToken: 2}
+	if err := s.AddJob(seed); err != nil {
+		t.Fatalf("failed seeding job: %v", err)
+	}
+
+	res := make(chan Res, 1)
+	heartbeat := make(chan HeartBeat)
+	c := NewCommitter(newCommitterConfig(3), s, res, heartbeat)
+
+	res <- Res{ID: "job-1", Status: NAck, Job: store.Job{ID: "job-1", LeaseToken: 1}}
+	close(res)
+	close(heartbeat)
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	c.run(ctx)
+
+	job, _ := s.job("job-1")
+	if job.Status != store.InFlight {
+		t.Fatalf("expected stale nack to leave job %s, got %s", store.InFlight, job.Status)
+	}
+	if job.Retries != 0 {
+		t.Fatalf("expected stale nack to leave retries unchanged, got %d", job.Retries)
+	}
+	if s.updateCount() != 0 {
+		t.Fatalf("expected stale nack to skip store updates, got %d", s.updateCount())
+	}
+}
+
+func TestCommitterRun_AckAppliesCurrentLeaseToken(t *testing.T) {
+	s := newCommitterStoreStub("job-1")
+	seed := store.Job{ID: "job-1", Status: store.InFlight, LeaseToken: 2}
+	if err := s.AddJob(seed); err != nil {
+		t.Fatalf("failed seeding job: %v", err)
+	}
+
+	res := make(chan Res, 1)
+	heartbeat := make(chan HeartBeat)
+	c := NewCommitter(newCommitterConfig(3), s, res, heartbeat)
+
+	res <- Res{ID: "job-1", Status: Ack, Job: store.Job{ID: "job-1", LeaseToken: 2}}
+	close(res)
+	close(heartbeat)
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	c.run(ctx)
+
+	job, _ := s.job("job-1")
+	if job.Status != store.Succeeded {
+		t.Fatalf("expected current ack to set status %s, got %s", store.Succeeded, job.Status)
+	}
+	if s.updateCount() != 1 {
+		t.Fatalf("expected one store update, got %d", s.updateCount())
+	}
+}
+
+func TestCommitterRun_NAckAppliesCurrentLeaseToken(t *testing.T) {
+	s := newCommitterStoreStub("job-1")
+	seed := store.Job{ID: "job-1", Status: store.InFlight, LeaseToken: 2}
+	if err := s.AddJob(seed); err != nil {
+		t.Fatalf("failed seeding job: %v", err)
+	}
+
+	res := make(chan Res, 1)
+	heartbeat := make(chan HeartBeat)
+	c := NewCommitter(newCommitterConfig(3), s, res, heartbeat)
+
+	res <- Res{ID: "job-1", Status: NAck, Job: store.Job{ID: "job-1", LeaseToken: 2}}
+	close(res)
+	close(heartbeat)
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	c.run(ctx)
+
+	job, _ := s.job("job-1")
+	if job.Status != store.Failed {
+		t.Fatalf("expected current nack to set status %s, got %s", store.Failed, job.Status)
+	}
+	if job.Retries != 1 {
+		t.Fatalf("expected current nack to increment retries to 1, got %d", job.Retries)
+	}
+	if s.updateCount() != 1 {
+		t.Fatalf("expected one store update, got %d", s.updateCount())
+	}
+}
+
 type committerStoreStub struct {
 	mu      sync.Mutex
 	jobs    map[string]store.Job
@@ -298,7 +449,7 @@ type committerStoreStub struct {
 func newCommitterStoreStub(ids ...string) *committerStoreStub {
 	jobs := make(map[string]store.Job, len(ids))
 	for _, id := range ids {
-		jobs[id] = store.Job{ID: id, Status: store.Ready}
+		jobs[id] = store.Job{ID: id, Status: store.Ready, LeaseToken: 1}
 	}
 
 	return &committerStoreStub{
@@ -387,4 +538,10 @@ func (s *committerStoreStub) UpdateJob(id string, update store.JobUpdate) error 
 
 func (s *committerStoreStub) GetAllJobs() []store.Job {
 	return nil
+}
+
+func (s *committerStoreStub) GetJob(id string) store.Job {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.jobs[id]
 }

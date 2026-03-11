@@ -83,6 +83,9 @@ func (n *MemoryStore) ClaimAvailable(opts store.ClaimOptions) []store.Job {
 		n.jobs[i].Status = store.InFlight
 		n.jobs[i].LeaseExpiresAt = &leaseExpiresAt
 		n.jobs[i].RetryAt = nil
+		// TODO: maybe we should use UUID's or hashes here?
+		n.jobs[i].LeaseToken++
+
 		claimed = append(claimed, n.jobs[i])
 	}
 
@@ -97,6 +100,7 @@ func (n *MemoryStore) ClaimAvailable(opts store.ClaimOptions) []store.Job {
 
 		n.jobs[i].Status = store.InFlight
 		n.jobs[i].LeaseExpiresAt = &leaseExpiresAt
+		n.jobs[i].LeaseToken++
 		claimed = append(claimed, n.jobs[i])
 	}
 
@@ -113,6 +117,7 @@ func (n *MemoryStore) ClaimAvailable(opts store.ClaimOptions) []store.Job {
 		n.jobs[i].Status = store.InFlight
 		n.jobs[i].LeaseExpiresAt = &leaseExpiresAt
 		n.jobs[i].RetryAt = nil
+		n.jobs[i].LeaseToken++
 		claimed = append(claimed, n.jobs[i])
 	}
 
@@ -136,6 +141,10 @@ func (n *MemoryStore) UpdateJob(id string, update store.JobUpdate) error {
 
 	for i := range n.jobs {
 		if n.jobs[i].ID == id {
+			if n.jobs[i].LeaseToken != update.LeaseToken {
+				// Skip updates if token doesnt match
+				continue
+			}
 			n.jobs[i].Status = update.Status
 			if update.Retries != nil {
 				n.jobs[i].Retries = *update.Retries
@@ -159,7 +168,25 @@ func (n *MemoryStore) GetAllJobs() []store.Job {
 	return result
 }
 
-func (n *MemoryStore) recoverExpiredLeasesLocked(now time.Time, maxRetries int, retryBackoffBaseMS int, retryBackoffMaxMS int) {
+func (n *MemoryStore) GetJob(id string) store.Job {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+
+	for i := range n.jobs {
+		if n.jobs[i].ID == id {
+			return n.jobs[i]
+		}
+	}
+
+	return store.Job{}
+}
+
+func (n *MemoryStore) recoverExpiredLeasesLocked(
+	now time.Time,
+	maxRetries int,
+	retryBackoffBaseMS int,
+	retryBackoffMaxMS int,
+) {
 	retryCfg := retry.Config{
 		MaxRetries:    maxRetries,
 		BackoffBaseMS: retryBackoffBaseMS,
@@ -176,6 +203,8 @@ func (n *MemoryStore) recoverExpiredLeasesLocked(now time.Time, maxRetries int, 
 		}
 
 		n.jobs[i].LeaseExpiresAt = nil
+		// TODO: hash or uuid here?
+		n.jobs[i].LeaseToken++
 		applyUpdate(&n.jobs[i], retry.FailureUpdate(n.jobs[i], now, retryCfg))
 	}
 }

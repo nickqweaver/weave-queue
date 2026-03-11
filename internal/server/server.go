@@ -211,8 +211,11 @@ func validateConfig(config Config) error {
 	if claimOpts.RetryBackoffMaxMS < 0 {
 		return errors.New("server config: ClaimOptions.RetryBackoffMaxMS must be zero or greater")
 	}
-	if claimOpts.RetryBackoffBaseMS > 0 && claimOpts.RetryBackoffMaxMS > 0 && claimOpts.RetryBackoffBaseMS > claimOpts.RetryBackoffMaxMS {
-		return errors.New("server config: ClaimOptions.RetryBackoffBaseMS must be less than or equal to ClaimOptions.RetryBackoffMaxMS")
+	if claimOpts.RetryBackoffBaseMS > 0 && claimOpts.RetryBackoffMaxMS > 0 &&
+		claimOpts.RetryBackoffBaseMS > claimOpts.RetryBackoffMaxMS {
+		return errors.New(
+			"server config: ClaimOptions.RetryBackoffBaseMS must be less than or equal to ClaimOptions.RetryBackoffMaxMS",
+		)
 	}
 
 	return nil

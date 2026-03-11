@@ -279,6 +279,59 @@ func TestClaimAvailable_ClaimsOnlyReadyForFreshJobs(t *testing.T) {
 	}
 }
 
+func TestClaimAvailable_MintsLeaseTokenForFreshReadyClaims(t *testing.T) {
+	m := NewMemoryStore()
+
+	addJobs(t, m,
+		store.Job{ID: "ready-1", Status: store.Ready, LeaseToken: 0},
+	)
+
+	claimed := m.ClaimAvailable(claimOpts(1))
+	if len(claimed) != 1 {
+		t.Fatalf("expected 1 claimed job, got %d", len(claimed))
+	}
+	if claimed[0].LeaseToken != 1 {
+		t.Fatalf("expected claimed fresh job lease token 1, got %d", claimed[0].LeaseToken)
+	}
+
+	stored := byID(m.GetAllJobs())["ready-1"]
+	if stored.LeaseToken != 1 {
+		t.Fatalf("expected stored fresh job lease token 1, got %d", stored.LeaseToken)
+	}
+}
+
+func TestClaimAvailable_MintsLeaseTokenForRetryClaimsInBackfillPass(t *testing.T) {
+	m := NewMemoryStore()
+	now := time.Now().UTC()
+	past := now.Add(-time.Minute)
+
+	addJobs(t, m,
+		store.Job{ID: "retry-1", Status: store.Failed, RetryAt: &past, LeaseToken: 0},
+		store.Job{ID: "retry-2", Status: store.Failed, RetryAt: &past, LeaseToken: 3},
+	)
+
+	claimed := m.ClaimAvailable(claimOpts(2))
+	if len(claimed) != 2 {
+		t.Fatalf("expected 2 claimed jobs, got %d", len(claimed))
+	}
+
+	claimedByID := byID(claimed)
+	if claimedByID["retry-1"].LeaseToken != 1 {
+		t.Fatalf("expected retry-1 claimed lease token 1, got %d", claimedByID["retry-1"].LeaseToken)
+	}
+	if claimedByID["retry-2"].LeaseToken != 4 {
+		t.Fatalf("expected retry-2 claimed lease token 4, got %d", claimedByID["retry-2"].LeaseToken)
+	}
+
+	stored := byID(m.GetAllJobs())
+	if stored["retry-1"].LeaseToken != 1 {
+		t.Fatalf("expected stored retry-1 lease token 1, got %d", stored["retry-1"].LeaseToken)
+	}
+	if stored["retry-2"].LeaseToken != 4 {
+		t.Fatalf("expected stored retry-2 lease token 4, got %d", stored["retry-2"].LeaseToken)
+	}
+}
+
 func TestClaimAvailable_RecoversExpiredLeaseWithBackoff(t *testing.T) {
 	m := NewMemoryStore()
 	now := time.Now().UTC()
@@ -306,6 +359,9 @@ func TestClaimAvailable_RecoversExpiredLeaseWithBackoff(t *testing.T) {
 	}
 	if expiredJob.Retries != 1 {
 		t.Fatalf("expected expired job retries to increment to 1, got %d", expiredJob.Retries)
+	}
+	if expiredJob.LeaseToken != 1 {
+		t.Fatalf("expected expired job lease token to increment to 1, got %d", expiredJob.LeaseToken)
 	}
 	if expiredJob.LeaseExpiresAt != nil {
 		t.Fatalf("expected expired job lease to be cleared")

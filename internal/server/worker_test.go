@@ -80,9 +80,9 @@ func TestWorkerRun_JobWithoutLeaseIsNacked(t *testing.T) {
 	missingLeaseID := "7"
 
 	jobs := []store.Job{
-		{ID: "1", Queue: "my_queue", Status: store.InFlight, Timeout: 500 * time.Millisecond, LeaseExpiresAt: &leaseExpiresAt},
+		{ID: "1", Queue: "my_queue", Status: store.InFlight, Timeout: 500 * time.Millisecond, LeaseExpiresAt: &leaseExpiresAt, LeaseToken: 1},
 		{ID: missingLeaseID, Queue: "my_queue", Status: store.InFlight, Timeout: 500 * time.Millisecond, LeaseExpiresAt: nil},
-		{ID: "3", Queue: "my_queue", Status: store.InFlight, Timeout: 500 * time.Millisecond, LeaseExpiresAt: &leaseExpiresAt},
+		{ID: "3", Queue: "my_queue", Status: store.InFlight, Timeout: 500 * time.Millisecond, LeaseExpiresAt: &leaseExpiresAt, LeaseToken: 1},
 	}
 
 	for _, job := range jobs {
@@ -129,6 +129,30 @@ func TestWorkerRun_JobWithoutLeaseIsNacked(t *testing.T) {
 	}
 	if missingLeaseRes.Message != "Job has not been leased" {
 		t.Fatalf("expected unleased job message %q, got %q", "Job has not been leased", missingLeaseRes.Message)
+	}
+}
+
+func TestWorkerRun_ResponseCarriesLeaseToken(t *testing.T) {
+	req := make(chan Req, 1)
+	res := make(chan Res, 1)
+	heartbeat := make(chan HeartBeat, 1)
+	w := newTestWorker(1, req, res, heartbeat)
+
+	now := time.Now().UTC()
+	lease := now.Add(time.Minute)
+	job := store.Job{ID: "1", Queue: "my_queue", Status: store.InFlight, Timeout: 500 * time.Millisecond, LeaseExpiresAt: &lease, LeaseToken: 42}
+	req <- Req{Job: job}
+	close(req)
+
+	w.Run(context.Background())
+
+	select {
+	case got := <-res:
+		if got.Job.LeaseToken != job.LeaseToken {
+			t.Fatalf("expected response lease token %d, got %d", job.LeaseToken, got.Job.LeaseToken)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for worker response")
 	}
 }
 
@@ -229,6 +253,7 @@ func jobsWithOneExpiredLease(total int, expiredIndex int) ([]store.Job, string) 
 			Status:         store.InFlight,
 			Timeout:        timeout,
 			LeaseExpiresAt: &lease,
+			LeaseToken:     1,
 		})
 	}
 

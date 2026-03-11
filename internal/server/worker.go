@@ -74,7 +74,7 @@ func (w *Worker) Run(ctx context.Context) {
 						return
 					case <-ticker.C:
 						select {
-						case w.heartbeat <- HeartBeat{Worker: w.ID, Job: jobID}:
+						case w.heartbeat <- HeartBeat{Worker: w.ID, Job: jobID, LeaseToken: j.LeaseToken}:
 						case <-jobCtx.Done():
 							return
 						case <-hbDone:
